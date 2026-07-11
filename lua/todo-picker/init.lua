@@ -28,18 +28,21 @@ function M.open(opts)
   return require('todo-picker.picker').open_todo_picker(opts)
 end
 
-function M.filter(args)
-  local picker = require('todo-picker.picker')
-  local filters = picker.parse_filter_args(args)
-  if #filters == 0 then
-    require('todo-picker.utils').notify_todo('Usage: :TodoFilter #label[,field=value,...]', vim.log.levels.WARN)
+function M.new_todo()
+  require('todo-picker.ui').open_new_todo_draft(nil, nil, {
+    title = "",
+    status = require('todo-picker.config').defaults.STATUS_TODO or "todo",
+    priority = require('todo-picker.config').defaults.PRIORITY_LOW or "low",
+    labels = {},
+  })
+end
+
+function M.new_todo_reference()
+  if vim.bo.filetype ~= 'markdown' then
+    require('todo-picker.utils').notify_todo('TodoNewReference works in markdown buffers', vim.log.levels.WARN)
     return
   end
-  M.open {
-    filters = filters,
-    apply_done_retention = false,
-    title = picker.build_filter_title(filters),
-  }
+  require('todo-picker.markdown').open_markdown_todo_draft_at_cursor()
 end
 
 function M.goto_todo()
@@ -53,6 +56,10 @@ end
 
 function M.reference()
   require('todo-picker.markdown').run_todo_reference_picker()
+end
+
+function M.kanban(opts)
+  require('todo-picker.kanban').open_kanban(opts)
 end
 
 return M

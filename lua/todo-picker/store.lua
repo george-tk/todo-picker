@@ -195,6 +195,9 @@ function M.encode_json_pretty(value, level)
   return table.concat(lines, '\n')
 end
 
+local cached_store = nil
+local last_file_mtime = nil
+
 function M.write_store(store)
   local store_path = utils.get_todo_store_path()
   local ok, encoded = pcall(M.encode_json_pretty, store)
@@ -206,16 +209,33 @@ function M.write_store(store)
     utils.notify_todo('Could not write ' .. config.options.todo_json_name, vim.log.levels.ERROR)
     return false
   end
+
+  cached_store = store
+  local uv = vim.loop or vim.uv
+  local stat = uv.fs_stat(store_path)
+  last_file_mtime = stat and stat.mtime.sec or 0
+
   return true
 end
 
 function M.load_store()
   local store_path = utils.get_todo_store_path()
+  local uv = vim.loop or vim.uv
+  local stat = uv.fs_stat(store_path)
+  local current_mtime = stat and stat.mtime.sec or 0
+
+  if cached_store and last_file_mtime == current_mtime then
+    return cached_store
+  end
+
   local lines = utils.read_file_lines(store_path)
 
   if not lines then
     local created = M.default_store()
     M.write_store(created)
+    cached_store = created
+    local stat_new = uv.fs_stat(store_path)
+    last_file_mtime = stat_new and stat_new.mtime.sec or 0
     return created
   end
 
@@ -225,6 +245,9 @@ function M.load_store()
     utils.notify_todo('Invalid todo.json; resetting store', vim.log.levels.WARN)
     local reset = M.default_store()
     M.write_store(reset)
+    cached_store = reset
+    local stat_new = uv.fs_stat(store_path)
+    last_file_mtime = stat_new and stat_new.mtime.sec or 0
     return reset
   end
 
@@ -240,6 +263,8 @@ function M.load_store()
     end
   end
 
+  cached_store = store
+  last_file_mtime = current_mtime
   return store
 end
 

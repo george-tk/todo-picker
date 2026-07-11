@@ -88,6 +88,47 @@ end
 
 function M.open_todo_detail(picker, item, opts)
 	opts = opts or {}
+	local w = math.floor(vim.o.columns * 0.8)
+	local editor_height = vim.o.lines - vim.o.cmdheight
+	if vim.o.laststatus > 0 then
+		editor_height = editor_height - 1
+	end
+	if vim.o.showtabline == 2 or (vim.o.showtabline == 1 and #vim.api.nvim_list_tabpages() > 1) then
+		editor_height = editor_height - 1
+	end
+	local h = math.floor(editor_height * 0.80)
+	local row = math.floor((vim.o.lines - h) / 2)
+	local col = math.floor((vim.o.columns - w) / 2)
+
+	local target_win = nil
+	if picker then
+		if picker.layout then
+			local win_val = picker.layout.win
+			if type(win_val) == "number" and vim.api.nvim_win_is_valid(win_val) then
+				target_win = win_val
+			elseif type(win_val) == "table" and type(win_val.win) == "number" and vim.api.nvim_win_is_valid(win_val.win) then
+				target_win = win_val.win
+			end
+		end
+		if not target_win and picker.list then
+			local win_val = picker.list.win
+			if type(win_val) == "number" and vim.api.nvim_win_is_valid(win_val) then
+				target_win = win_val
+			elseif type(win_val) == "table" and type(win_val.win) == "number" and vim.api.nvim_win_is_valid(win_val.win) then
+				target_win = win_val.win
+			end
+		end
+	end
+
+	if target_win then
+		local pos = vim.fn.win_screenpos(target_win)
+		if pos and pos[1] > 0 and pos[2] > 0 then
+			row = pos[1] - 2
+			col = pos[2] - 2
+			w = vim.api.nvim_win_get_width(target_win)
+			h = vim.api.nvim_win_get_height(target_win)
+		end
+	end
 	if item and item.todo_is_tag_header then
 		require("todo-picker.picker").picker_toggle_subtasks(picker, item)
 		return
@@ -167,6 +208,8 @@ function M.open_todo_detail(picker, item, opts)
 	local direct_subtasks = is_draft and {} or collect_direct_subtasks(store_obj, todo.id)
 	local picker_context = opts.picker_context
 		or require("todo-picker.picker").capture_picker_reopen_context(picker, item)
+
+
 	local panel_context = {
 		picker = picker,
 		picker_context = picker_context,
@@ -199,10 +242,7 @@ function M.open_todo_detail(picker, item, opts)
 		lines[#lines + 1] = text
 	end
 
-	local inner_width = math.max(
-		UI.panel.inner_width_min,
-		math.min(UI.panel.inner_width_max, math.floor(vim.o.columns * UI.panel.inner_width_ratio))
-	)
+	local inner_width = w - 2 - #UI.panel.indent - 2
 	local sep = UI.panel.indent .. string.rep(UI.panel.section_sep_char, inner_width)
 	local reference_rel = vim.fn.fnamemodify(reference_file or "", ":~:.")
 	local reference_value = ""
@@ -224,16 +264,43 @@ function M.open_todo_detail(picker, item, opts)
 	local function meta_row(label, value)
 		return string.format("%s%-" .. meta_label_width .. "s%s", UI.panel.indent, label .. ":", value)
 	end
-	local function section(title)
-		push(UI.panel.indent .. title, "SnacksPickerKeymapLhs")
+	local priority_badges = {
+		[config.PRIORITY_HIGH] = "●",
+		[config.PRIORITY_MEDIUM] = "●",
+		[config.PRIORITY_LOW] = " ",
+	}
+
+	local status_icons = {
+		[config.STATUS_TODO] = "",
+		[config.STATUS_BLOCKED] = "",
+		[config.STATUS_DOING] = "",
+		[config.STATUS_PEER_REVIEW] = "",
+		[config.STATUS_DONE] = "",
+	}
+
+	local status_color_hl = config.STATUS_COLOR[config.STATUS_SORT[status] or 0] or "Normal"
+	local priority_hl = config.PRIORITY_HL[priority] or "NonText"
+
+	local function section(icon, title)
+		push_segments({
+			{ UI.panel.indent },
+			{ icon .. " ", "SnacksPickerKeymapLhs" },
+			{ title, "SnacksPickerKeymapLhs" }
+		})
 		push(sep, "Comment")
 	end
 
-	push(UI.panel.indent .. msg, "SnacksPickerKeymapLhs")
+	-- Push Task Title as Header
+	push_segments({
+		{ UI.panel.indent },
+		{ "󰓌 ", "SnacksPickerKeymapLhs" },
+		{ msg, "SnacksPickerKeymapLhs" }
+	})
 	local title_line_num = #lines
+	push(sep, "Comment")
 	push("")
-	push("")
-	section("Description")
+
+	section("", "Description")
 	local description_first_line
 	local description_last_line
 	local description_input_line
@@ -263,13 +330,13 @@ function M.open_todo_detail(picker, item, opts)
 	end
 
 	push("")
-	section("Log")
+	section("", "Log")
 	local log_first_line
 	local log_last_line
 	local log_input_line
 	if #log_entries > 0 then
 		for _, entry in ipairs(log_entries) do
-			push(UI.panel.details_indent .. entry, "Normal")
+			push(UI.panel.details_indent .. "• " .. entry, "Normal")
 			if not log_first_line then
 				log_first_line = #lines
 			end
@@ -286,12 +353,12 @@ function M.open_todo_detail(picker, item, opts)
 	end
 
 	push("")
-	section("Tags")
+	section("", "Tags")
 	local tags_first_line
 	local tags_last_line
 	local tags_input_line
 	for _, label in ipairs(labels) do
-		push(UI.panel.indent .. label, "Normal")
+		push(UI.panel.indent .. "#" .. label, "Normal")
 		if not tags_first_line then
 			tags_first_line = #lines
 		end
@@ -299,7 +366,11 @@ function M.open_todo_detail(picker, item, opts)
 	end
 	if #extra_fields > 0 then
 		for _, field in ipairs(extra_fields) do
-			push(meta_row(field.name, field.value or ""), "Normal")
+			push_segments({
+				{ UI.panel.indent },
+				{ string.format("%-" .. meta_label_width .. "s", field.name .. ":"), "Comment" },
+				{ field.value or "", "Normal" }
+			})
 			if not tags_first_line then
 				tags_first_line = #lines
 			end
@@ -316,16 +387,75 @@ function M.open_todo_detail(picker, item, opts)
 	end
 
 	push("")
-	section("Meta")
-	push(meta_row("Status", status_value(status)), "Normal")
+	section("⚙", "Meta")
+	local parent_title = ""
+	if todo.parent_id and todo.parent_id ~= "" then
+		local parent_bucket = store.find_todo_bucket(store_obj, todo.parent_id)
+		if parent_bucket and parent_bucket.todo then
+			parent_title = parent_bucket.todo.title
+		else
+			parent_title = todo.parent_id
+		end
+	end
+
+	-- Push Status field
+	push_segments({
+		{ UI.panel.indent },
+		{ string.format("%-" .. meta_label_width .. "s", "Status:"), "Comment" },
+		{ (status_icons[status] or "") .. " " .. status_value(status), status_color_hl }
+	})
 	local status_row_line = #lines
-	push(meta_row("Priority", priority_value(priority)), "Normal")
+
+	-- Push Priority field
+	push_segments({
+		{ UI.panel.indent },
+		{ string.format("%-" .. meta_label_width .. "s", "Priority:"), "Comment" },
+		{ (priority_badges[priority] or " ") .. " " .. priority_value(priority), priority_hl }
+	})
 	local priority_row_line = #lines
-	push(meta_row("Created", created_date), "Normal")
+
+	-- Push Created field
+	push_segments({
+		{ UI.panel.indent },
+		{ string.format("%-" .. meta_label_width .. "s", "Created:"), "Comment" },
+		{ created_date, "Normal" }
+	})
 	local created_row_line = #lines
-	push(meta_row("Completed", completed_date), "Normal")
+
+	-- Push Completed field
+	push_segments({
+		{ UI.panel.indent },
+		{ string.format("%-" .. meta_label_width .. "s", "Completed:"), "Comment" },
+		{ completed_date ~= "" and completed_date or "—", completed_date ~= "" and "Comment" or "NonText" }
+	})
 	local completed_row_line = #lines
-	push(meta_row("Reference", reference_value), "Normal")
+
+	if parent_title ~= "" then
+		push_segments({
+			{ UI.panel.indent },
+			{ string.format("%-" .. meta_label_width .. "s", "Parent:"), "Comment" },
+			{ parent_title, config.PARENT_HINT_HL }
+		})
+	end
+
+	if #direct_subtasks > 0 then
+		local child_titles = {}
+		for _, subtask in ipairs(direct_subtasks) do
+			table.insert(child_titles, subtask.title or "")
+		end
+		push_segments({
+			{ UI.panel.indent },
+			{ string.format("%-" .. meta_label_width .. "s", "Children:"), "Comment" },
+			{ table.concat(child_titles, ", "), "Normal" }
+		})
+	end
+
+	push_segments({
+		{ UI.panel.indent },
+		{ string.format("%-" .. meta_label_width .. "s", "Reference:"), "Comment" },
+		{ reference_value ~= "" and reference_value or "—", reference_value ~= "" and "Underlined" or "NonText" }
+	})
+	local parent_row_line = #lines
 
 	local help_line = #lines + 1
 
@@ -335,18 +465,20 @@ function M.open_todo_detail(picker, item, opts)
 
 	if #direct_subtasks > 0 then
 		push("")
-		section("Subtasks")
+		section("󰔖", "Subtasks")
 		for _, subtask in ipairs(direct_subtasks) do
 			local sub_status = subtask.status or config.STATUS_TODO
 			local sub_priority = subtask.priority or config.PRIORITY_LOW
 			local status_hl = config.STATUS_COLOR[config.STATUS_SORT[sub_status] or -1] or "Normal"
 			local title_hl = utils.title_highlight_for_status(sub_status, status_hl)
-			local priority_badge = config.PRIORITY_BADGE[sub_priority] or config.options.picker_badges.low
+			if sub_status == config.STATUS_DONE then
+				title_hl = "Comment" -- dimmed if done!
+			end
 
 			push_segments({
-				{ " ", "Normal" },
-				{ priority_badge, config.PRIORITY_HL[sub_priority] or "NonText" },
-				{ UI.picker.row_gap, "Normal" },
+				{ UI.panel.indent .. "  ", "Comment" },
+				{ (priority_badges[sub_priority] or " ") .. " ", config.PRIORITY_HL[sub_priority] or "NonText" },
+				{ (status_icons[sub_status] or "") .. " ", status_hl },
 				{ subtask.title or "", title_hl },
 			})
 			if not subtasks_first_line then
@@ -357,9 +489,7 @@ function M.open_todo_detail(picker, item, opts)
 		end
 	end
 
-	local w = math.min(inner_width + 4, math.floor(vim.o.columns * UI.panel.float_width_ratio))
-	local max_h = math.max(UI.panel.min_height, math.floor(vim.o.lines * UI.panel.float_height_ratio))
-	local h = math.min(#lines, max_h)
+
 
 	local buf = vim.api.nvim_create_buf(false, true)
 	vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
@@ -374,12 +504,14 @@ function M.open_todo_detail(picker, item, opts)
 		relative = "editor",
 		width = w,
 		height = h,
-		row = math.floor((vim.o.lines - h) / 2),
-		col = math.floor((vim.o.columns - w) / 2),
+		row = row,
+		col = col,
 		style = "minimal",
 		border = UI.panel.border,
 		zindex = 200,
 	})
+
+	vim.wo[win].winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder"
 
 	if vim.fn.mode():sub(1, 1) == "i" then
 		vim.cmd.stopinsert()
@@ -390,9 +522,6 @@ function M.open_todo_detail(picker, item, opts)
 	vim.wo[win].virtualedit = "onemore"
 	vim.wo[win].breakindent = true
 	vim.wo[win].breakindentopt = UI.panel.breakindentopt
-	vim.wo[win].showbreak = "  "
-	vim.wo[win].winhighlight = "Normal:NormalFloat,FloatBorder:FloatBorder,FloatTitle:Title"
-
 	local ns = vim.api.nvim_create_namespace("snacks_todo_detail")
 	for _, hl in ipairs(hls) do
 		vim.api.nvim_buf_add_highlight(buf, ns, hl[2], hl[1], 0, -1)
@@ -400,6 +529,14 @@ function M.open_todo_detail(picker, item, opts)
 	for _, span in ipairs(span_hls) do
 		vim.api.nvim_buf_add_highlight(buf, ns, span[4], span[1], span[2], span[3])
 	end
+
+	vim.api.nvim_create_autocmd({ "TextChanged", "TextChangedI" }, {
+		buffer = buf,
+		callback = function()
+			pcall(vim.api.nvim_buf_clear_namespace, buf, ns, title_line_num - 1, title_line_num)
+			pcall(vim.api.nvim_buf_add_highlight, buf, ns, "SnacksPickerKeymapLhs", title_line_num - 1, 2, -1)
+		end,
+	})
 
 	local help_win
 	local function close_help()
@@ -424,11 +561,11 @@ function M.open_todo_detail(picker, item, opts)
 			"  <CR>  Save and close",
 			"  w     Save edits",
 			"  q     Close panel",
-			"  S     Cycle status",
-			"  P     Cycle priority",
+			"  s     Cycle status",
+			"  p     Cycle priority",
 			"  D     Delete todo",
 			"  r     Set relationship (choose direction + unlink)",
-			"  p     Open parent details",
+			"  P     Open parent details",
 			"  c     Open selected child details",
 			"  a     Add subtask",
 			"  e     Open source (todo.json)",
@@ -465,6 +602,8 @@ function M.open_todo_detail(picker, item, opts)
 			zindex = 210,
 		})
 
+		vim.wo[help_win].winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs"
+
 		vim.keymap.set("n", "q", close_help, { buffer = hbuf, nowait = true, silent = true })
 		vim.keymap.set("n", "<Esc>", close_help, { buffer = hbuf, nowait = true, silent = true })
 		vim.keymap.set("n", "?", close_help, { buffer = hbuf, nowait = true, silent = true })
@@ -474,13 +613,13 @@ function M.open_todo_detail(picker, item, opts)
 		local description_idx, log_idx, tags_idx, meta_idx
 		for i, line in ipairs(editor_lines) do
 			local t = vim.trim(line)
-			if t == "Description" then
+			if t:match("Description") then
 				description_idx = i
-			elseif t == "Log" then
+			elseif t:match("Log") then
 				log_idx = i
-			elseif t == "Tags" then
+			elseif t:match("Tags") then
 				tags_idx = i
-			elseif t == "Meta" then
+			elseif t:match("Meta") then
 				meta_idx = i
 			end
 		end
@@ -492,7 +631,8 @@ function M.open_todo_detail(picker, item, opts)
 			return nil, nil, nil, nil, nil
 		end
 
-		local task_text = vim.trim(editor_lines[title_line_num] or "")
+		local task_text = editor_lines[title_line_num] or ""
+		task_text = task_text:gsub("^%s*󰓌%s*", ""):gsub("%s+$", "")
 
 		local function is_separator_line(text)
 			local compact = text:gsub("%s+", "")
@@ -519,6 +659,7 @@ function M.open_todo_detail(picker, item, opts)
 		for i = log_idx + 1, tags_idx - 1 do
 			local t = vim.trim(editor_lines[i] or "")
 			if t ~= "" and not is_separator_line(t) then
+				t = t:gsub("^•%s*", "")
 				log_items[#log_items + 1] = t
 			end
 		end
@@ -529,6 +670,7 @@ function M.open_todo_detail(picker, item, opts)
 			local t = vim.trim(editor_lines[i] or "")
 			if t ~= "" and not is_separator_line(t) then
 				local payload = vim.trim(t:match("^[-*+]%s*(.*)$") or t)
+				payload = payload:gsub("^#%s*", "")
 				local label = payload:match("^#(.+)$")
 				if label and vim.trim(label) ~= "" then
 					labels_out[#labels_out + 1] = vim.trim(label)
@@ -550,20 +692,44 @@ function M.open_todo_detail(picker, item, opts)
 	end
 
 	local function render_meta_rows()
+		local status_hl_group = config.STATUS_COLOR[config.STATUS_SORT[current_status] or 0] or "Normal"
+		local prio_hl_group = config.PRIORITY_HL[current_priority] or "NonText"
+
+		local status_val_str = config.STATUS_LABEL[current_status] or current_status or ""
+		local priority_val_str = current_priority or ""
+		local created_val_str = current_created_date or ""
+		local completed_val_str = current_completed_date ~= "" and current_completed_date or "—"
+
 		local rows = {
-			{ status_row_line, "Status", config.STATUS_LABEL[current_status] or current_status or "" },
-			{ priority_row_line, "Priority", current_priority or "" },
-			{ created_row_line, "Created", current_created_date or "" },
-			{ completed_row_line, "Completed", current_completed_date or "" },
+			{ status_row_line, "Status:", status_hl_group, status_icons[current_status] or "", status_val_str },
+			{ priority_row_line, "Priority:", prio_hl_group, priority_badges[current_priority] or " ", priority_val_str },
+			{ created_row_line, "Created:", "Normal", nil, created_val_str },
+			{ completed_row_line, "Completed:", current_completed_date ~= "" and "Comment" or "NonText", nil, completed_val_str },
 		}
+
 		for _, row in ipairs(rows) do
-			vim.api.nvim_buf_set_lines(
-				buf,
-				row[1] - 1,
-				row[1],
-				false,
-				{ string.format("%s%-" .. meta_label_width .. "s%s", UI.panel.indent, row[2] .. ":", row[3]) }
-			)
+			local line_idx = row[1] - 1
+			local label = row[2]
+			local hl = row[3]
+			local icon = row[4]
+			local val = row[5]
+
+			local icon_str = icon and (icon .. " ") or ""
+			local text_val = icon_str .. val
+			local text = string.format("%s%-" .. meta_label_width .. "s%s", UI.panel.indent, label, text_val)
+
+			vim.bo[buf].modifiable = true
+			vim.api.nvim_buf_set_lines(buf, line_idx, line_idx + 1, false, { text })
+			vim.bo[buf].modifiable = false
+
+			-- Clear namespace highlights on this specific line
+			vim.api.nvim_buf_clear_namespace(buf, ns, line_idx, line_idx + 1)
+
+			local indent_len = #UI.panel.indent
+			-- Apply label highlight (dimmed Comment)
+			vim.api.nvim_buf_add_highlight(buf, ns, "Comment", line_idx, indent_len, indent_len + meta_label_width)
+			-- Apply value highlight
+			vim.api.nvim_buf_add_highlight(buf, ns, hl, line_idx, indent_len + meta_label_width, -1)
 		end
 	end
 
@@ -608,6 +774,10 @@ function M.open_todo_detail(picker, item, opts)
 		end
 
 		close_float()
+		local kanban = require("todo-picker.kanban")
+		if kanban.board_state.board_win and kanban.board_state.board_win:valid() then
+			kanban.render_board()
+		end
 		require("todo-picker.picker").refresh_picker_items(picker, { focus_key = nil })
 		if reopen_previous_detail_panel() then
 			return
@@ -724,6 +894,10 @@ function M.open_todo_detail(picker, item, opts)
 			picker,
 			{ focus_key = require("todo-picker.picker").get_focus_key_for_item(updated_item or item) }
 		)
+		local kanban = require("todo-picker.kanban")
+		if kanban.board_state.board_win and kanban.board_state.board_win:valid() then
+			kanban.render_board()
+		end
 		return true
 	end
 
@@ -1040,14 +1214,12 @@ function M.open_todo_detail(picker, item, opts)
 	end
 
 	local function dismiss()
-		close_float()
 		if reopen_previous_detail_panel() then
+			close_float()
 			return
 		end
 		transition_to_picker()
-		if picker and not picker.closed and picker.focus then
-			picker:focus("list")
-		end
+		close_float()
 		if vim.fn.mode():sub(1, 1) == "i" then
 			vim.cmd.stopinsert()
 		end
@@ -1058,16 +1230,12 @@ function M.open_todo_detail(picker, item, opts)
 			vim.cmd.stopinsert()
 		end
 		if save_edits() then
-			close_float()
-			if reopen_previous_detail_panel() then
-				return
-			end
-			transition_to_picker()
+			dismiss()
 		end
 	end
 
 	local title_line = title_line_num or 1
-	local title_col = 2
+	local title_col = 6
 	local description_line = description_input_line or description_first_line or (title_line + 1)
 	local description_col = 2
 	local log_line = log_input_line or log_first_line or (description_line + 1)
@@ -1380,7 +1548,7 @@ function M.open_todo_detail(picker, item, opts)
 	)
 	vim.keymap.set(
 		"n",
-		"S",
+		"s",
 		cycle_card_status,
 		{ buffer = buf, nowait = true, silent = true, desc = "cycle todo status" }
 	)
@@ -1390,7 +1558,7 @@ function M.open_todo_detail(picker, item, opts)
 	end, { buffer = buf, nowait = true, silent = true, desc = "set parent/child relationship" })
 	vim.keymap.set(
 		"n",
-		"p",
+		"P",
 		open_parent_from_detail,
 		{ buffer = buf, nowait = true, silent = true, desc = "open parent todo" }
 	)
@@ -1402,7 +1570,7 @@ function M.open_todo_detail(picker, item, opts)
 	)
 	vim.keymap.set(
 		"n",
-		"P",
+		"p",
 		cycle_card_priority,
 		{ buffer = buf, nowait = true, silent = true, desc = "cycle todo priority" }
 	)

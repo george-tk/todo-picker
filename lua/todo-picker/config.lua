@@ -24,7 +24,7 @@ M.defaults = {
   },
   ui = {
     picker = {
-      title = 'TODOs · / search · Enter log · S status · P priority · p parent · o order · x done-cycle · f filter · t task · a subtask · e source · m reference',
+      title = 'TODOs · / search · Enter log · s status · p priority · P parent · o order · x done-cycle · f filter · t task · a subtask · e source · m reference',
       row_gap = ' ',
       progress_sep = '  ',
       message_indent = 5,
@@ -35,15 +35,12 @@ M.defaults = {
         auto_hide = { 'input' },
         layout = {
           backdrop = false,
-          width = 0.58,
+          width = 0.80,
           min_width = 88,
-          max_width = 120,
-          height = 0.72,
+          height = 0.80,
           min_height = 14,
           box = 'vertical',
           border = 'rounded',
-          title = '{title} {live} {flags}',
-          title_pos = 'center',
           { win = 'input', height = 1, border = 'bottom' },
           { win = 'list', border = 'none' },
           { win = 'preview', title = '{preview}', height = 0.45, border = 'top' },

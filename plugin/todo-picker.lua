@@ -3,28 +3,30 @@ if vim.g.loaded_todo_picker then
 end
 vim.g.loaded_todo_picker = true
 
-vim.api.nvim_create_user_command('Todo', function()
+vim.api.nvim_create_user_command('TodoList', function()
   require('todo-picker').open()
-end, { desc = 'Open TODO Picker' })
+end, { desc = 'Open TODO List' })
 
-vim.api.nvim_create_user_command('TodoPicker', function()
-  require('todo-picker').open()
-end, { desc = 'Open TODO Picker' })
+vim.api.nvim_create_user_command('TodoBoard', function()
+  require('todo-picker.kanban').open_kanban()
+end, { desc = 'Open TODO Board' })
 
-vim.api.nvim_create_user_command('TodoFilter', function(cmd)
-  require('todo-picker').filter(cmd.args)
-end, {
-  nargs = '*',
-  desc = 'Show TODOs filtered by metadata fields or labels',
-})
+vim.api.nvim_create_user_command('TodoNew', function()
+  require('todo-picker').new_todo()
+end, { desc = 'Create a new TODO ticket' })
 
-vim.api.nvim_create_user_command('TodoGoTo', function()
+vim.api.nvim_create_user_command('TodoLinkNew', function()
+  require('todo-picker').new_todo_reference()
+end, { desc = 'Create a new TODO ticket and reference it at the cursor line' })
+
+vim.api.nvim_create_user_command('TodoLink', function()
+  require('todo-picker').reference()
+end, { desc = 'Insert a TODO reference in markdown via picker selection' })
+
+vim.api.nvim_create_user_command('TodoJump', function()
   require('todo-picker').goto_todo()
 end, { desc = 'Open details for the TODO under cursor' })
 
-vim.api.nvim_create_user_command('TodoReference', function()
-  require('todo-picker').reference()
-end, { desc = 'Insert a TODO reference in markdown via picker selection' })
 
 local group = vim.api.nvim_create_augroup('TodoPickerPlugin', { clear = true })
 local defaults = require('todo-picker.config').defaults

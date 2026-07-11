@@ -16,8 +16,8 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 
 ```lua
 return {
-  'george-tk/todo-picker', 
-  -- for local testing remove gitpath  
+  'george-tk/todo-picker',
+  -- for local testing remove gitpath
   -- dir = '~/todo-picker/',
   -- name = 'todo-picker'
   dependencies = {
@@ -29,6 +29,7 @@ return {
   }
 }
 ```
+
 ## Structure
 
 The plugin is modularly structured:
@@ -50,9 +51,12 @@ todo-picker/
 
 ## User Commands
 
-- `:TodoFilter #label[,field=value,...]` - Show TODOs filtered by labels or metadata.
-- `:TodoGoTo` - Jump to details panel for the markdown reference under the cursor.
-- `:TodoReference` - Open picker to select a TODO and insert a reference in the current markdown buffer.
+- `:TodoList` - Open the TODO list picker.
+- `:TodoBoard` - Open the Kanban board.
+- `:TodoNew` - Open a blank details panel to create a new task.
+- `:TodoLinkNew` - Create a new task and insert its markdown reference at the cursor line.
+- `:TodoLink` - Open picker to select a TODO and insert a reference in the current markdown buffer.
+- `:TodoJump` - Jump to details panel for the markdown reference under the cursor.
 
 ## Keymaps
 
@@ -60,11 +64,11 @@ todo-picker/
 
 - `<CR>`: Open task details panel
 - `/`: Toggle search input / list focus
-- `S`: Cycle status
-- `P`: Cycle priority
+- `s`: Cycle status
+- `p`: Cycle priority
 - `x`: Cycle done visibility (`hide`, `recent`, `all`)
 - `r`: Prompt relationship settings (choose direction + unlink)
-- `p`: Open parent todo detail
+- `P`: Open parent todo detail
 - `f`: Filter picker items by field=value or #label
 - `t`: Create a sibling task
 - `a`: Create a subtask
@@ -82,11 +86,11 @@ todo-picker/
 - `<CR>`: Save and close details panel
 - `w`: Save edits in-place
 - `q` / `<Esc>`: Close details panel
-- `S`: Cycle status
-- `P`: Cycle priority
+- `s`: Cycle status
+- `p`: Cycle priority
 - `D`: Delete todo
 - `r`: Prompt relationship settings
-- `p`: Open parent details panel
+- `P`: Open parent details panel
 - `c`: Open selected subtask details panel under cursor
 - `a`: Add a subtask
 - `e`: Open source JSON file

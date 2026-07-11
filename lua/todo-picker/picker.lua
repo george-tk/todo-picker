@@ -5,6 +5,17 @@ local utils = require("todo-picker.utils")
 local store = require("todo-picker.store")
 local markdown = require("todo-picker.markdown")
 
+local function is_selectable(item)
+	if not item then return false end
+	if item.todo_is_empty_state then return false end
+	if item.todo_is_tag_header == true then return false end
+	if item.todo_id == "independent" then return false end
+	if item.todo_flat_order == false and item.todo_depth == 0 then
+		return false
+	end
+	return true
+end
+
 M.picker_hierarchy_ui_state = {
 	collapsed_by_id = {},
 	collapse_all = false,
@@ -37,12 +48,11 @@ function M.toggle_picker_help(picker)
 		"  Enter  Open details",
 		"  /      Toggle list and search focus",
 		"  i      Focus search input",
-		"  S      Cycle status",
+		"  s      Cycle status",
 		"  x      Cycle done visibility (hide/recent/all)",
-		"  P      Cycle priority",
+		"  p      Cycle priority",
 		"  r      Set relationship (choose direction + unlink)",
-		"  p      Open parent details",
-		"  f      Filter field=value",
+		"  P      Open parent details",
 		"  t      Create sibling task",
 		"  a      Create subtask",
 		"  g      Group/Ungroup subtasks",
@@ -78,10 +88,10 @@ function M.toggle_picker_help(picker)
 		col = math.floor((vim.o.columns - w) / 2),
 		style = "minimal",
 		border = UI.panel.border,
-		title = " Picker Help ",
-		title_pos = "center",
 		zindex = 210,
 	})
+
+	vim.wo[help_win].winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs"
 
 	picker_help_windows[picker] = help_win
 
@@ -127,6 +137,21 @@ function M.get_todo_hierarchy_index(store_obj)
 	local entries_by_id = {}
 	local children_by_parent = {}
 
+	local has_independent_parent = false
+	for _, todo in ipairs(store_obj.todos or {}) do
+		if todo.id == "independent" then
+			has_independent_parent = true
+			break
+		end
+	end
+
+	local child_counts = {}
+	for _, todo in ipairs(store_obj.todos or {}) do
+		if todo.parent_id and todo.parent_id ~= "" and todo.parent_id ~= "independent" then
+			child_counts[todo.parent_id] = (child_counts[todo.parent_id] or 0) + 1
+		end
+	end
+
 	for _, todo in ipairs(store_obj.todos or {}) do
 		local status_rank = config.STATUS_SORT[todo.status] or 9
 		local priority_rank = config.PRIORITY_SORT[todo.priority] or 9
@@ -138,9 +163,23 @@ function M.get_todo_hierarchy_index(store_obj)
 			completed_rank = 99999999 - completed_sort
 		end
 
+		if todo.id == "independent" then
+			status_rank = -999
+			completed_rank = -999
+			priority_rank = -999
+			created_rank = -999
+		end
+
+		local parent_id = todo.parent_id
+		if has_independent_parent and todo.id ~= "independent" then
+			if (not parent_id or parent_id == "") and (not child_counts[todo.id] or child_counts[todo.id] == 0) then
+				parent_id = "independent"
+			end
+		end
+
 		local entry = {
 			id = todo.id,
-			parent_id = todo.parent_id,
+			parent_id = parent_id,
 			status = todo.status,
 			status_rank = status_rank,
 			priority_rank = priority_rank,
@@ -149,12 +188,12 @@ function M.get_todo_hierarchy_index(store_obj)
 		}
 		entries[#entries + 1] = entry
 		entries_by_id[todo.id] = entry
-		index.id_to_parent[todo.id] = todo.parent_id
+		index.id_to_parent[todo.id] = parent_id
 
-		if todo.parent_id then
-			children_by_parent[todo.parent_id] = children_by_parent[todo.parent_id] or {}
-			children_by_parent[todo.parent_id][#children_by_parent[todo.parent_id] + 1] = entry
-			index.parent_to_child_count[todo.parent_id] = (index.parent_to_child_count[todo.parent_id] or 0) + 1
+		if parent_id then
+			children_by_parent[parent_id] = children_by_parent[parent_id] or {}
+			children_by_parent[parent_id][#children_by_parent[parent_id] + 1] = entry
+			index.parent_to_child_count[parent_id] = (index.parent_to_child_count[parent_id] or 0) + 1
 		end
 	end
 
@@ -243,90 +282,6 @@ function M.is_hidden_by_collapse(parent_id, hierarchy_state, hierarchy_index)
 	return false
 end
 
-function M.matches_filters(fields, labels, filters)
-	if not filters or #filters == 0 then
-		return true
-	end
-
-	local label_lookup = {}
-	for _, label in ipairs(labels or {}) do
-		label_lookup[tostring(label):lower()] = true
-	end
-
-	for _, filter in ipairs(filters) do
-		if filter.kind == "label" then
-			if not label_lookup[tostring(filter.value or ""):lower()] then
-				return false
-			end
-		else
-			local actual = fields[filter.field]
-			if actual == nil then
-				return false
-			end
-			if tostring(actual):lower() ~= tostring(filter.value):lower() then
-				return false
-			end
-		end
-	end
-
-	return true
-end
-
-function M.parse_filter_args(raw)
-	local filters = {}
-	for token in (raw or ""):gmatch("[^,%s]+") do
-		local label = token:match("^#(.+)$")
-		if label and vim.trim(label) ~= "" then
-			filters[#filters + 1] = {
-				kind = "label",
-				value = vim.trim(label):lower(),
-			}
-		else
-			local field, value = token:match("^@?([%w_]+)%s*[:=]%s*(.+)$")
-			if field and value and value ~= "" then
-				filters[#filters + 1] = {
-					kind = "field",
-					field = field:lower(),
-					value = vim.trim(value),
-				}
-			end
-		end
-	end
-	return filters
-end
-
-function M.build_filter_title(filters)
-	if not filters or #filters == 0 then
-		return "FILTERED TODOs"
-	end
-
-	local parts = {}
-	for _, f in ipairs(filters) do
-		if f.kind == "label" then
-			parts[#parts + 1] = "#" .. tostring(f.value or "")
-		else
-			parts[#parts + 1] = f.field .. "=" .. f.value
-		end
-	end
-
-	return "FILTERED TODOs (" .. table.concat(parts, ", ") .. ")"
-end
-
-function M.format_filter_args(filters)
-	if not filters or #filters == 0 then
-		return ""
-	end
-	local parts = {}
-	for _, filter in ipairs(filters) do
-		if filter.kind == "label" then
-			parts[#parts + 1] = "#" .. tostring(filter.value or "")
-		else
-			parts[#parts + 1] = filter.field .. "=" .. tostring(filter.value or "")
-		end
-	end
-	return table.concat(parts, ", ")
-end
-
 function M.should_keep_done_item(item, apply_done_retention)
 	local completed_date = item.todo_completed_date
 	if completed_date == "" then
@@ -348,7 +303,7 @@ end
 
 function M.get_group_by_mode(opts)
 	if not opts then
-		return "parent"
+		return "tag"
 	end
 	if opts.group_by then
 		return opts.group_by
@@ -356,7 +311,7 @@ function M.get_group_by_mode(opts)
 	if opts.flat_order == true then
 		return "none"
 	else
-		return "parent"
+		return "tag"
 	end
 end
 
@@ -389,7 +344,7 @@ function M.build_quick_create_picker_item()
 		text = message,
 		todo_text = message,
 		todo_is_empty_state = true,
-		todo_grouped_order = -1,
+		todo_grouped_order = -9999999999999,
 		todo_status = -1,
 		todo_completed_sort_effective = -1,
 		todo_priority_sort_effective = -1,
@@ -410,10 +365,47 @@ function M.collect_picker_items(opts)
 	if only_done then
 		done_visibility = "all"
 	end
-	local filters = opts.filters or {}
+
+	local raw_todos = store_obj.todos or {}
+	local todos = {}
+	for _, t in ipairs(raw_todos) do
+		table.insert(todos, t)
+	end
+
+	local has_independent = false
+	if group_by == "parent" then
+		local by_id = {}
+		local parent_has_children = {}
+		for _, t in ipairs(todos) do
+			by_id[t.id] = t
+			if t.parent_id and t.parent_id ~= "" then
+				parent_has_children[t.parent_id] = true
+			end
+		end
+		for _, t in ipairs(todos) do
+			if (not t.parent_id or t.parent_id == "" or not by_id[t.parent_id]) and not parent_has_children[t.id] then
+				has_independent = true
+				break
+			end
+		end
+	end
+
+	if has_independent then
+		table.insert(todos, {
+			id = "independent",
+			title = "Independent Tasks",
+			status = "TODO",
+			created = "1970-01-01",
+			is_virtual = true,
+		})
+	end
+
+	local mock_store_obj = { todos = todos }
+	local hierarchy_index = M.get_todo_hierarchy_index(mock_store_obj)
+	local hierarchy_state = M.picker_hierarchy_ui_state
 
 	local title_by_id = {}
-	for _, todo in ipairs(store_obj.todos or {}) do
+	for _, todo in ipairs(todos) do
 		if todo.id then
 			title_by_id[todo.id] = todo.title
 		end
@@ -424,7 +416,7 @@ function M.collect_picker_items(opts)
 		local items_by_tag = {}
 		local all_tags_set = {}
 
-		for _, todo in ipairs(store_obj.todos or {}) do
+		for _, todo in ipairs(todos) do
 			local item = store.build_item_from_todo(todo)
 
 			local status = config.STATUS_SORT[todo.status] or -1
@@ -452,15 +444,25 @@ function M.collect_picker_items(opts)
 			item.todo_log = todo.log or todo.details or {}
 			item.todo_details = item.todo_log
 			item.text = todo.title
-			local status_search = string.lower(tostring(todo.status or ""))
-			if status_search ~= "" then
-				item.text = item.text .. " " .. status_search
+			local status_val = tostring(todo.status or ""):lower()
+			if status_val ~= "" then
+				item.text = item.text .. " status=" .. status_val
+			end
+			local priority_val = tostring(todo.priority or ""):lower()
+			if priority_val ~= "" then
+				item.text = item.text .. " priority=" .. priority_val
 			end
 			if #item.todo_labels > 0 then
-				item.text = item.text .. " " .. table.concat(item.todo_labels, " ")
+				for _, label in ipairs(item.todo_labels) do
+					local clean = tostring(label):lower()
+					if clean ~= "" then
+						item.text = item.text .. " #" .. clean
+					end
+				end
 			end
 			if item.todo_parent_title and item.todo_parent_title ~= "" then
-				item.text = item.text .. " " .. item.todo_parent_title
+				local parent_lower = string.lower(item.todo_parent_title)
+				item.text = item.text .. " [" .. parent_lower .. "] parent=" .. parent_lower
 			end
 
 			-- Check if we should keep this todo
@@ -468,7 +470,6 @@ function M.collect_picker_items(opts)
 			local keep = false
 			if
 				(done_visibility ~= "hide" or status ~= config.STATUS_SORT[config.STATUS_DONE])
-				and M.matches_filters(item.todo_fields, item.todo_labels, filters)
 				and (not only_done or status == config.STATUS_SORT[config.STATUS_DONE])
 			then
 				keep = true
@@ -527,7 +528,7 @@ function M.collect_picker_items(opts)
 			return string.lower(a) < string.lower(b)
 		end)
 		if all_tags_set["Untagged"] then
-			table.insert(sorted_tags, "Untagged")
+			table.insert(sorted_tags, 1, "Untagged")
 		end
 
 		local final_items = {}
@@ -610,7 +611,7 @@ function M.collect_picker_items(opts)
 	end
 
 	local items = {}
-	for _, todo in ipairs(store_obj.todos or {}) do
+	for _, todo in ipairs(todos) do
 		local item = store.build_item_from_todo(todo)
 
 		local status = config.STATUS_SORT[todo.status] or -1
@@ -650,22 +651,31 @@ function M.collect_picker_items(opts)
 		item.todo_log = todo.log or todo.details or {}
 		item.todo_details = item.todo_log
 		item.text = todo.title
-		local status_search = string.lower(tostring(todo.status or ""))
-		if status_search ~= "" then
-			item.text = item.text .. " " .. status_search
+		local status_val = tostring(todo.status or ""):lower()
+		if status_val ~= "" then
+			item.text = item.text .. " status=" .. status_val
+		end
+		local priority_val = tostring(todo.priority or ""):lower()
+		if priority_val ~= "" then
+			item.text = item.text .. " priority=" .. priority_val
 		end
 		if #item.todo_labels > 0 then
-			item.text = item.text .. " " .. table.concat(item.todo_labels, " ")
+			for _, label in ipairs(item.todo_labels) do
+				local clean = tostring(label):lower()
+				if clean ~= "" then
+					item.text = item.text .. " #" .. clean
+				end
+			end
 		end
 		if item.todo_parent_title and item.todo_parent_title ~= "" then
-			item.text = item.text .. " " .. item.todo_parent_title
+			local parent_lower = string.lower(item.todo_parent_title)
+			item.text = item.text .. " [" .. parent_lower .. "] parent=" .. parent_lower
 		end
 
 		local is_parent_with_children = flat_order and item.todo_child_count > 0
 		if not is_parent_with_children then
 			if
 				(done_visibility ~= "hide" or status ~= config.STATUS_SORT[config.STATUS_DONE])
-				and M.matches_filters(item.todo_fields, item.todo_labels, filters)
 				and (not only_done or status == config.STATUS_SORT[config.STATUS_DONE])
 				and (flat_order or not M.is_hidden_by_collapse(item.todo_parent_id, hierarchy_state, hierarchy_index))
 			then
@@ -978,20 +988,39 @@ function M.picker_create_task_below(picker, item)
 		return
 	end
 
+	local format_opts = picker.opts._todo_format_opts or {}
+	local current_mode = M.get_group_by_mode(format_opts)
+
 	local inherited_labels = {}
 	local inherited_extra_fields = {}
 	local parent_id = nil
 
-	if target.todo_is_tag_header then
-		if target.todo_text ~= "Untagged" then
-			inherited_labels = { target.todo_text }
+	if current_mode == "tag" then
+		if target.todo_is_tag_header then
+			if target.todo_text ~= "Untagged" then
+				inherited_labels = { target.todo_text }
+			end
+		else
+			inherited_labels = vim.deepcopy(target.todo_labels or {})
+			inherited_extra_fields = vim.deepcopy(target.todo_extra_fields or {})
+		end
+	elseif current_mode == "parent" then
+		if not target.todo_is_tag_header and target.todo_id ~= "independent" then
+			parent_id = target.todo_parent_id
+			if parent_id == "independent" then
+				parent_id = nil
+			end
+			inherited_extra_fields = vim.deepcopy(target.todo_extra_fields or {})
 		end
 	else
-		inherited_labels = vim.deepcopy(target.todo_labels or {})
-		inherited_extra_fields = vim.deepcopy(target.todo_extra_fields or {})
-		parent_id = target.todo_parent_id
-		if parent_id and parent_id:match("^tag:") then
-			parent_id = nil
+		-- Global order mode: inherit both (original behavior)
+		if not target.todo_is_tag_header and target.todo_id ~= "independent" then
+			inherited_labels = vim.deepcopy(target.todo_labels or {})
+			inherited_extra_fields = vim.deepcopy(target.todo_extra_fields or {})
+			parent_id = target.todo_parent_id
+			if parent_id == "independent" then
+				parent_id = nil
+			end
 		end
 	end
 
@@ -1006,8 +1035,8 @@ end
 
 function M.picker_create_subtask(picker, item)
 	local target = M.picker_current_item(picker, item)
-	if target and target.todo_is_tag_header then
-		utils.notify_todo("Cannot create a subtask on a tag header", vim.log.levels.WARN)
+	if target and (target.todo_is_tag_header or target.todo_id == "independent") then
+		utils.notify_todo("Cannot create a subtask on a virtual header", vim.log.levels.WARN)
 		return
 	end
 	local ui = require("todo-picker.ui")
@@ -1205,58 +1234,7 @@ function M.picker_toggle_all_subtasks(picker)
 	M.refresh_picker_items(picker, { focus_key = focus_key })
 end
 
-function M.picker_prompt_filter(picker, item)
-	if not picker then
-		return
-	end
-
-	local reopen_opts = vim.deepcopy((picker.opts and picker.opts._todo_format_opts) or {})
-	local current_item = M.picker_current_item(picker, item)
-	local focus_key = M.get_focus_key_for_item(current_item)
-	local hierarchy_state = vim.deepcopy(M.get_picker_hierarchy_state(picker) or {
-		collapsed_by_id = {},
-		collapse_all = false,
-	})
-
-	vim.ui.input({
-		prompt = "Todo filter (#label or field=value, comma-separated): ",
-		default = M.format_filter_args(reopen_opts.filters),
-	}, function(input)
-		if input == nil then
-			return
-		end
-
-		local raw = vim.trim(input)
-		if raw == "" then
-			reopen_opts.filters = nil
-			if reopen_opts.title and reopen_opts.title:match("^FILTERED TODOs") then
-				reopen_opts.title = nil
-			end
-		else
-			local filters = M.parse_filter_args(raw)
-			if #filters == 0 then
-				utils.notify_todo("Usage: #label or field=value (comma-separated)", vim.log.levels.WARN)
-				return
-			end
-			reopen_opts.filters = filters
-			reopen_opts.apply_done_retention = false
-			reopen_opts.title = M.build_filter_title(filters)
-		end
-
-		reopen_opts._todo_hierarchy_state = hierarchy_state
-
-		if picker and not picker.closed and picker.close then
-			picker:close()
-		end
-
-		local new_picker = M.open_todo_picker(reopen_opts)
-		if focus_key and new_picker then
-			vim.schedule(function()
-				M.restore_picker_focus(new_picker, focus_key)
-			end)
-		end
-	end)
-end
+-- Filter functions removed
 
 function M.picker_toggle_order_mode(picker, item)
 	if not picker or not picker.opts then
@@ -1330,17 +1308,26 @@ function M.capture_picker_reopen_context(picker, fallback_item)
 end
 
 function M.open_todo_picker(opts)
-	return Snacks.picker(M.get_todo_picker_opts(opts or {}))
+	local picker = Snacks.picker(M.get_todo_picker_opts(opts or {}))
+	if picker then
+		vim.schedule(function()
+			local current = picker:current()
+			if current and not is_selectable(current) then
+				for candidate, idx in picker:iter() do
+					if is_selectable(candidate) then
+						picker.list:view(idx)
+						break
+					end
+				end
+			end
+		end)
+	end
+	return picker
 end
 
 function M.reopen_picker_from_context(context)
 	if not context then
 		return
-	end
-
-	local picker = context.picker
-	if picker and not picker.closed and picker.close then
-		picker:close()
 	end
 
 	local reopen_opts = vim.deepcopy(context.reopen_opts or {})
@@ -1354,7 +1341,13 @@ function M.reopen_picker_from_context(context)
 			M.restore_picker_focus(new_picker, context.focus_key)
 		end)
 	end
+
+	local picker = context.picker
+	if picker and not picker.closed and picker.close then
+		picker:close()
+	end
 end
+
 
 function M.get_todo_picker_opts(opts)
 	opts = opts or {}
@@ -1368,7 +1361,7 @@ function M.get_todo_picker_opts(opts)
 	local items = M.collect_picker_items(opts)
 
 	return {
-		title = opts.title or "TODOs",
+		title = "",
 		_todo_format_opts = opts,
 		items = items,
 		focus = "list",
@@ -1412,14 +1405,160 @@ function M.get_todo_picker_opts(opts)
 			todo_toggle_help = function(picker)
 				M.toggle_picker_help(picker)
 			end,
-			todo_prompt_filter = function(picker, item)
-				M.picker_prompt_filter(picker, item)
-			end,
+
 			todo_toggle_order_mode = function(picker, item)
 				M.picker_toggle_order_mode(picker, item)
 			end,
 			todo_toggle_done_visibility = function(picker, item)
 				M.picker_toggle_done_visibility(picker, item)
+			end,
+			todo_list_down = function(picker)
+				local current_item = picker:current()
+				local current_idx = nil
+				local items_by_idx = {}
+				local max_idx = 0
+				for candidate, idx in picker:iter() do
+					items_by_idx[idx] = candidate
+					if candidate == current_item then
+						current_idx = idx
+					end
+					if idx > max_idx then
+						max_idx = idx
+					end
+				end
+				if not current_idx then return end
+				local next_idx = current_idx + 1
+				while next_idx <= max_idx do
+					local item = items_by_idx[next_idx]
+					if is_selectable(item) then
+						picker.list:view(next_idx)
+						return
+					end
+					next_idx = next_idx + 1
+				end
+			end,
+			todo_list_up = function(picker)
+				local current_item = picker:current()
+				local current_idx = nil
+				local items_by_idx = {}
+				for candidate, idx in picker:iter() do
+					items_by_idx[idx] = candidate
+					if candidate == current_item then
+						current_idx = idx
+					end
+				end
+				if not current_idx then return end
+				local prev_idx = current_idx - 1
+				while prev_idx >= 1 do
+					local item = items_by_idx[prev_idx]
+					if is_selectable(item) then
+						picker.list:view(prev_idx)
+						return
+					end
+					prev_idx = prev_idx - 1
+				end
+			end,
+			todo_tab_next_group = function(picker)
+				local current_item = picker:current()
+				local current_idx = nil
+				local items_by_idx = {}
+				local group_starts = {}
+				for candidate, idx in picker:iter() do
+					items_by_idx[idx] = candidate
+					if candidate == current_item then
+						current_idx = idx
+					end
+					local is_start = candidate.todo_is_tag_header == true
+						or candidate.todo_id == "independent"
+						or (candidate.todo_flat_order == false and candidate.todo_depth == 0 and not candidate.todo_is_empty_state)
+					if is_start then
+						table.insert(group_starts, idx)
+					end
+				end
+				if #group_starts == 0 then
+					picker:action("list_down")
+					return
+				end
+
+				local current_group_idx = nil
+				if current_idx then
+					for i, gs_idx in ipairs(group_starts) do
+						if gs_idx <= current_idx then
+							current_group_idx = i
+						end
+					end
+				end
+
+				local next_group_idx = 1
+				if current_group_idx then
+					next_group_idx = current_group_idx + 1
+					if next_group_idx > #group_starts then
+						next_group_idx = 1
+					end
+				end
+
+				local target_idx = group_starts[next_group_idx]
+				local max_idx = 0
+				for _, idx in ipairs(group_starts) do
+					if idx > max_idx then max_idx = idx end
+				end
+				while target_idx <= max_idx + 10 do
+					local item = items_by_idx[target_idx]
+					if is_selectable(item) then
+						picker.list:view(target_idx)
+						return
+					end
+					target_idx = target_idx + 1
+				end
+			end,
+			todo_tab_prev_group = function(picker)
+				local current_item = picker:current()
+				local current_idx = nil
+				local items_by_idx = {}
+				local group_starts = {}
+				for candidate, idx in picker:iter() do
+					items_by_idx[idx] = candidate
+					if candidate == current_item then
+						current_idx = idx
+					end
+					local is_start = candidate.todo_is_tag_header == true
+						or candidate.todo_id == "independent"
+						or (candidate.todo_flat_order == false and candidate.todo_depth == 0 and not candidate.todo_is_empty_state)
+					if is_start then
+						table.insert(group_starts, idx)
+					end
+				end
+				if #group_starts == 0 then
+					picker:action("list_up")
+					return
+				end
+
+				local current_group_idx = nil
+				if current_idx then
+					for i, gs_idx in ipairs(group_starts) do
+						if gs_idx <= current_idx then
+							current_group_idx = i
+						end
+					end
+				end
+
+				local prev_group_idx = #group_starts
+				if current_group_idx then
+					prev_group_idx = current_group_idx - 1
+					if prev_group_idx < 1 then
+						prev_group_idx = #group_starts
+					end
+				end
+
+				local target_idx = group_starts[prev_group_idx]
+				while target_idx <= #items_by_idx + 10 do
+					local item = items_by_idx[target_idx]
+					if is_selectable(item) then
+						picker.list:view(target_idx)
+						return
+					end
+					target_idx = target_idx + 1
+				end
 			end,
 			todo_input_escape_to_list = function(picker)
 				if vim.fn.mode():sub(1, 1) == "i" then
@@ -1433,27 +1572,36 @@ function M.get_todo_picker_opts(opts)
 		format = function(item)
 			if item.todo_is_empty_state then
 				return {
-					{ config.PRIORITY_BADGE[config.PRIORITY_LOW] or "  ", "NonText" },
-					{ UI.picker.row_gap, "Normal" },
-					{ UI.picker.tree.base, "Comment" },
+					{ tree_prefix, "Comment" },
 					{ "+ New TODO", "SnacksPickerKeymapLhs" },
 				}
 			end
 
-			local title_hl
-			local priority_badge
-			local priority_hl
-			if item.todo_is_tag_header then
+			local status_icons = {
+				[config.STATUS_TODO] = "",
+				[config.STATUS_BLOCKED] = "",
+				[config.STATUS_DOING] = "",
+				[config.STATUS_PEER_REVIEW] = "",
+				[config.STATUS_DONE] = "",
+			}
+
+			local priority_badges = {
+				[config.PRIORITY_HIGH] = "●",
+				[config.PRIORITY_MEDIUM] = "●",
+				[config.PRIORITY_LOW] = " ",
+			}
+
+			local priority = item.todo_priority or config.PRIORITY_LOW
+			local priority_hl = config.PRIORITY_HL[priority] or "NonText"
+			local priority_badge_char = priority_badges[priority] or " "
+
+			local title_hl = "Normal"
+			if item.todo_is_tag_header or item.todo_id == "independent" then
 				title_hl = config.TAG_HEADER_HL
-				priority_badge = "  "
-				priority_hl = "NonText"
 			else
 				local status = item.todo_status or -1
 				local status_color = config.STATUS_COLOR[status] or "Normal"
 				title_hl = utils.title_highlight_for_status(item.todo_status_value, status_color)
-				local priority = item.todo_priority or config.PRIORITY_LOW
-				priority_badge = config.PRIORITY_BADGE[priority] or config.options.picker_badges.low
-				priority_hl = config.PRIORITY_HL[priority] or "NonText"
 			end
 
 			local depth = item.todo_depth or 0
@@ -1464,10 +1612,10 @@ function M.get_todo_picker_opts(opts)
 
 			if has_children then
 				local depth_indent = string.rep(UI.picker.tree.indent_step, is_child and depth or 0)
-				tree_prefix = depth_indent .. (is_collapsed and UI.picker.tree.closed or UI.picker.tree.open)
+				tree_prefix = depth_indent .. (is_collapsed and " " or " ")
 			elseif is_child then
 				local depth_indent = string.rep(UI.picker.tree.indent_step, depth)
-				tree_prefix = depth_indent .. UI.picker.tree.leaf
+				tree_prefix = depth_indent .. "  "
 			end
 
 			local progress_badge = item.todo_progress_badge or ""
@@ -1475,15 +1623,17 @@ function M.get_todo_picker_opts(opts)
 				progress_badge = UI.picker.progress_sep .. progress_badge
 			end
 
+			local group_by = item.todo_group_by or "parent"
+			local show_parent_hint = (item.todo_flat_order or group_by == "tag") and not item.todo_is_tag_header
+			local show_tags_hint = (item.todo_flat_order or group_by == "parent") and not item.todo_is_tag_header
+
 			local parent_hint = ""
-			local show_parent_hint = (item.todo_flat_order or item.todo_group_by == "tag")
-				and not item.todo_is_tag_header
 			if show_parent_hint and item.todo_parent_title and item.todo_parent_title ~= "" then
 				parent_hint = " [" .. item.todo_parent_title .. "]"
 			end
 
 			local tags_hint = ""
-			if not item.todo_is_tag_header and item.todo_labels and #item.todo_labels > 0 then
+			if show_tags_hint and item.todo_labels and #item.todo_labels > 0 then
 				local label_tokens = {}
 				for _, label in ipairs(item.todo_labels) do
 					label_tokens[#label_tokens + 1] = "#" .. tostring(label)
@@ -1496,25 +1646,77 @@ function M.get_todo_picker_opts(opts)
 				if display_text ~= "Untagged" then
 					display_text = "#" .. display_text
 				end
-			end
+				return {
+					{ "󰉋 ", config.TAG_HEADER_HL },
+					{ display_text, config.TAG_HEADER_HL },
+					{ progress_badge, "Comment" },
+				}
+			elseif item.todo_has_children and (depth == 0) then
+				return {
+					{ tree_prefix, "Comment" },
+					{ "󰉋 ", config.TAG_HEADER_HL },
+					{ display_text, config.TAG_HEADER_HL },
+					{ progress_badge, "Comment" },
+				}
+			else
+				local status_icon = status_icons[item.todo_status_value] or ""
+				local text_color = "Normal"
+				if item.todo_status_value == config.STATUS_DONE then
+					text_color = "Comment"
+				end
 
-			return {
-				{ priority_badge, priority_hl },
-				{ UI.picker.row_gap, "Normal" },
-				{ tree_prefix, "Comment" },
-				{ display_text, title_hl },
-				{ parent_hint, config.PARENT_HINT_HL },
-				{ tags_hint, config.PARENT_HINT_HL },
-				{ progress_badge, "Comment" },
-			}
+				local meta_segments = {}
+				if priority_badge_char ~= " " then
+					table.insert(meta_segments, { priority_badge_char, priority_hl })
+				end
+				if parent_hint ~= "" then
+					table.insert(meta_segments, { parent_hint, config.PARENT_HINT_HL })
+				end
+				if tags_hint ~= "" then
+					table.insert(meta_segments, { tags_hint, config.PARENT_HINT_HL })
+				end
+				if progress_badge ~= "" then
+					table.insert(meta_segments, { progress_badge, "Comment" })
+				end
+
+				local result = {
+					{ tree_prefix, "Comment" },
+					{ status_icon .. " ", title_hl },
+					{ display_text, text_color },
+				}
+
+				if #meta_segments > 0 then
+					table.insert(result, { "  •  ", "Comment" })
+					for s_idx, seg in ipairs(meta_segments) do
+						table.insert(result, seg)
+						if s_idx < #meta_segments then
+							table.insert(result, { " ", "Normal" })
+						end
+					end
+				end
+
+				return result
+			end
 		end,
 		live = false,
 		on_close = function(picker)
 			M.close_picker_help(picker)
 		end,
-		layout = vim.deepcopy(UI.picker.layout),
+		layout = (function()
+			local l = vim.deepcopy(UI.picker.layout)
+			if l and l.layout then
+				l.layout.backdrop = 60
+			end
+			return l
+		end)(),
 		win = {
+			wo = {
+				winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs",
+			},
 			input = {
+				wo = {
+					winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs",
+				},
 				keys = {
 					["<Esc>"] = {
 						"todo_input_escape_to_list",
@@ -1524,41 +1726,46 @@ function M.get_todo_picker_opts(opts)
 					["?"] = { "todo_toggle_help", mode = { "n" }, desc = "show picker help" },
 					["/"] = { "toggle_focus", mode = { "n" }, desc = "toggle input/list focus" },
 					["D"] = { "todo_delete", mode = { "n" }, desc = "delete todo" },
-					["<Tab>"] = { "list_down", mode = { "n" }, desc = "next todo" },
-					["<S-Tab>"] = { "list_up", mode = { "n" }, desc = "previous todo" },
-					["S"] = { "todo_toggle_status", mode = { "n" }, desc = "toggle todo status" },
-					["P"] = { "todo_toggle_priority", mode = { "n" }, desc = "toggle todo priority" },
-					["p"] = { "todo_open_parent", mode = { "n" }, desc = "open parent todo details" },
+					["<Tab>"] = { "todo_tab_next_group", mode = { "n" }, desc = "next group" },
+					["<S-Tab>"] = { "todo_tab_prev_group", mode = { "n" }, desc = "previous group" },
+					["s"] = { "todo_toggle_status", mode = { "n" }, desc = "toggle todo status" },
+					["p"] = { "todo_toggle_priority", mode = { "n" }, desc = "toggle todo priority" },
+					["P"] = { "todo_open_parent", mode = { "n" }, desc = "open parent todo details" },
 					["g"] = { "todo_toggle_order_mode", mode = { "n" }, desc = "toggle grouped/global order" },
 					["x"] = {
 						"todo_toggle_done_visibility",
 						mode = { "n" },
 						desc = "cycle done visibility (hide/recent/all)",
 					},
-					["f"] = { "todo_prompt_filter", mode = { "n" }, desc = "filter todos" },
 					["r"] = { "todo_relationship", mode = { "n" }, desc = "set parent/child relationship" },
 					["z"] = { "todo_toggle_subtasks", mode = { "n" }, desc = "toggle subtasks" },
 					["Z"] = { "todo_toggle_all_subtasks", mode = { "n" }, desc = "toggle all subtasks" },
 				},
 			},
 			list = {
+				wo = {
+					winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs",
+				},
 				keys = {
 					["?"] = { "todo_toggle_help", mode = { "n" }, desc = "show picker help" },
 					["/"] = { "toggle_focus", mode = { "n" }, desc = "focus search input" },
 					["i"] = { "focus_input", mode = { "n" }, desc = "focus search input" },
 					["D"] = { "todo_delete", mode = { "n" }, desc = "delete todo" },
-					["<Tab>"] = { "list_down", mode = { "n" }, desc = "next todo" },
-					["<S-Tab>"] = { "list_up", mode = { "n" }, desc = "previous todo" },
-					["S"] = { "todo_toggle_status", mode = { "n" }, desc = "toggle todo status" },
-					["p"] = { "todo_open_parent", mode = { "n" }, desc = "open parent todo details" },
-					["P"] = { "todo_toggle_priority", mode = { "n" }, desc = "toggle todo priority" },
+					["j"] = { "todo_list_down", mode = { "n" }, desc = "next todo" },
+					["k"] = { "todo_list_up", mode = { "n" }, desc = "previous todo" },
+					["<Down>"] = { "todo_list_down", mode = { "n" }, desc = "next todo" },
+					["<Up>"] = { "todo_list_up", mode = { "n" }, desc = "previous todo" },
+					["<Tab>"] = { "todo_tab_next_group", mode = { "n" }, desc = "next group" },
+					["<S-Tab>"] = { "todo_tab_prev_group", mode = { "n" }, desc = "previous group" },
+					["s"] = { "todo_toggle_status", mode = { "n" }, desc = "toggle todo status" },
+					["P"] = { "todo_open_parent", mode = { "n" }, desc = "open parent todo details" },
+					["p"] = { "todo_toggle_priority", mode = { "n" }, desc = "toggle todo priority" },
 					["g"] = { "todo_toggle_order_mode", mode = { "n" }, desc = "toggle grouped/global order" },
 					["x"] = {
 						"todo_toggle_done_visibility",
 						mode = { "n" },
 						desc = "cycle done visibility (hide/recent/all)",
 					},
-					["f"] = { "todo_prompt_filter", mode = { "n" }, desc = "filter todos" },
 					["r"] = { "todo_relationship", mode = { "n" }, desc = "set parent/child relationship" },
 					["t"] = { "todo_create_task", mode = { "n" }, desc = "create task below current" },
 					["a"] = { "todo_create_subtask", mode = { "n" }, desc = "create subtask for current" },

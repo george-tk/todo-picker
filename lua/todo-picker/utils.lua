@@ -45,11 +45,24 @@ function M.apply_todo_status_highlights()
   })
 
   vim.api.nvim_set_hl(0, config.TAG_HEADER_HL, {
-    fg = M.get_highlight_hex('Directory', 'fg#') or M.get_highlight_hex('DiagnosticInfo', 'fg#'),
-    bg = M.get_highlight_hex('Directory', 'bg#') or M.get_highlight_hex('DiagnosticInfo', 'bg#'),
-    sp = M.get_highlight_hex('Directory', 'sp#') or M.get_highlight_hex('DiagnosticInfo', 'sp#'),
-    italic = false,
+    link = 'SnacksPickerKeymapLhs',
   })
+
+  vim.api.nvim_set_hl(0, "TodoBoardActiveBorder", {
+    fg = "Yellow",
+    bold = true,
+  })
+
+  vim.api.nvim_set_hl(0, "TodoTransparentBorder", {
+    fg = M.get_highlight_hex("Comment", "fg#") or M.get_highlight_hex("NonText", "fg#"),
+    bg = "NONE",
+  })
+
+  vim.api.nvim_set_hl(0, "SnacksPickerBorder", { link = "TodoTransparentBorder" })
+  vim.api.nvim_set_hl(0, "SnacksPicker", { link = "Normal" })
+  vim.api.nvim_set_hl(0, "SnacksPickerInput", { link = "Normal" })
+  vim.api.nvim_set_hl(0, "SnacksPickerList", { link = "Normal" })
+  vim.api.nvim_set_hl(0, "SnacksPickerPreview", { link = "Normal" })
 
   vim.api.nvim_set_hl(0, config.TITLE_HL_BLOCKED, {
     fg = M.get_highlight_hex('DiagnosticError', 'fg#'),
@@ -63,6 +76,14 @@ function M.apply_todo_status_highlights()
     bg = M.get_highlight_hex('Directory', 'bg#') or M.get_highlight_hex('DiagnosticInfo', 'bg#'),
     sp = M.get_highlight_hex('Directory', 'sp#') or M.get_highlight_hex('DiagnosticInfo', 'sp#'),
     italic = false,
+  })
+
+  local group = vim.api.nvim_create_augroup("todo_picker_colors", { clear = true })
+  vim.api.nvim_create_autocmd("ColorScheme", {
+    group = group,
+    callback = function()
+      pcall(M.apply_todo_status_highlights)
+    end,
   })
 end
 
@@ -168,12 +189,24 @@ function M.read_file_lines(file)
 end
 
 function M.write_text_file(file, text)
-  local handle = io.open(file, 'w')
+  local tmp_file = file .. '.tmp'
+  local handle = io.open(tmp_file, 'w')
   if not handle then
     return false
   end
-  handle:write(text)
+  local ok, err = pcall(function()
+    handle:write(text)
+  end)
   handle:close()
+  if not ok then
+    os.remove(tmp_file)
+    return false
+  end
+  local renamed, rename_err = os.rename(tmp_file, file)
+  if not renamed then
+    os.remove(tmp_file)
+    return false
+  end
   return true
 end
 
