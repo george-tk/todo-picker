@@ -255,27 +255,34 @@ function M.open_todo_detail(picker, item, opts)
 	local current_created_date = created_date
 	local current_completed_date = completed_date
 
+	local function title_case(str)
+		if not str or str == "" then return "" end
+		return (str:gsub("(%w+)", function(w)
+			return w:sub(1, 1):upper() .. w:sub(2):lower()
+		end):gsub("_", " "))
+	end
+
 	local function status_value(s)
-		return config.STATUS_LABEL[s] or s or ""
+		return title_case(config.STATUS_LABEL[s] or s or "")
 	end
 	local function priority_value(p)
-		return p or ""
+		return title_case(p or "")
 	end
 	local function meta_row(label, value)
 		return string.format("%s%-" .. meta_label_width .. "s%s", UI.panel.indent, label .. ":", value)
 	end
 	local priority_badges = {
-		[config.PRIORITY_HIGH] = "●",
-		[config.PRIORITY_MEDIUM] = "●",
-		[config.PRIORITY_LOW] = " ",
+		[config.PRIORITY_HIGH] = config.ICONS.priority.HIGH or "●",
+		[config.PRIORITY_MEDIUM] = config.ICONS.priority.MEDIUM or "●",
+		[config.PRIORITY_LOW] = config.ICONS.priority.LOW or " ",
 	}
 
 	local status_icons = {
-		[config.STATUS_TODO] = "",
-		[config.STATUS_BLOCKED] = "",
-		[config.STATUS_DOING] = "",
-		[config.STATUS_PEER_REVIEW] = "",
-		[config.STATUS_DONE] = "",
+		[config.STATUS_TODO] = config.ICONS.status.TODO,
+		[config.STATUS_BLOCKED] = config.ICONS.status.BLOCKED,
+		[config.STATUS_DOING] = config.ICONS.status.DOING,
+		[config.STATUS_PEER_REVIEW] = config.ICONS.status.PEER_REVIEW,
+		[config.STATUS_DONE] = config.ICONS.status.DONE,
 	}
 
 	local status_color_hl = config.STATUS_COLOR[config.STATUS_SORT[status] or 0] or "Normal"
@@ -402,7 +409,7 @@ function M.open_todo_detail(picker, item, opts)
 	push_segments({
 		{ UI.panel.indent },
 		{ string.format("%-" .. meta_label_width .. "s", "Status:"), "Comment" },
-		{ (status_icons[status] or "") .. " " .. status_value(status), status_color_hl }
+		{ status_value(status), status_color_hl }
 	})
 	local status_row_line = #lines
 
@@ -410,77 +417,150 @@ function M.open_todo_detail(picker, item, opts)
 	push_segments({
 		{ UI.panel.indent },
 		{ string.format("%-" .. meta_label_width .. "s", "Priority:"), "Comment" },
-		{ (priority_badges[priority] or " ") .. " " .. priority_value(priority), priority_hl }
+		{ priority_value(priority), priority_hl }
 	})
 	local priority_row_line = #lines
 
-	-- Push Created field
-	push_segments({
-		{ UI.panel.indent },
-		{ string.format("%-" .. meta_label_width .. "s", "Created:"), "Comment" },
-		{ created_date, "Normal" }
-	})
-	local created_row_line = #lines
-
-	-- Push Completed field
-	push_segments({
-		{ UI.panel.indent },
-		{ string.format("%-" .. meta_label_width .. "s", "Completed:"), "Comment" },
-		{ completed_date ~= "" and completed_date or "—", completed_date ~= "" and "Comment" or "NonText" }
-	})
-	local completed_row_line = #lines
-
-	if parent_title ~= "" then
+	-- Push Created field (only if non-empty)
+	local created_row_line = nil
+	if created_date and created_date ~= "" then
 		push_segments({
+			{ UI.panel.indent },
+			{ string.format("%-" .. meta_label_width .. "s", "Created:"), "Comment" },
+			{ created_date, "Normal" }
+		})
+		created_row_line = #lines
+	end
+
+	-- Push Completed field (only if non-empty and not "—")
+	local completed_row_line = nil
+	if completed_date and completed_date ~= "" and completed_date ~= "—" then
+		push_segments({
+			{ UI.panel.indent },
+			{ string.format("%-" .. meta_label_width .. "s", "Completed:"), "Comment" },
+			{ completed_date, "Comment" }
+		})
+		completed_row_line = #lines
+	end
+
+	local function resolve_parent_todo(target_id)
+		if not target_id or target_id == "" or target_id == "independent" then
+			return nil
+		end
+		if tostring(target_id):sub(1, 4) == "tag:" then
+			return nil
+		end
+
+		local bucket = store.find_todo_bucket(store_obj, target_id)
+		if bucket and bucket.todo then
+			return bucket.todo
+		end
+
+		if store_obj and store_obj.todos then
+			for _, t in ipairs(store_obj.todos) do
+				if t.id == target_id or t.title == target_id then
+					return t
+				end
+			end
+		end
+
+		return nil
+	end
+
+	-- Resolve Parent Item
+	local parent_item = nil
+	local parent_row_line = nil
+	local real_parent_id = todo.parent_id
+	if (not real_parent_id or real_parent_id == "" or tostring(real_parent_id):sub(1, 4) == "tag:") and draft then
+		real_parent_id = draft.parent_id
+	end
+	if (not real_parent_id or real_parent_id == "" or tostring(real_parent_id):sub(1, 4) == "tag:") and item then
+		real_parent_id = item.todo_parent_id
+	end
+
+	local p_todo = resolve_parent_todo(real_parent_id)
+
+	if p_todo then
+		parent_item = store.build_item_from_todo(p_todo)
+		local p_status = p_todo.status or config.STATUS_TODO
+		local p_priority = p_todo.priority or config.PRIORITY_LOW
+
+		local s_icon = status_icons[p_status] or ""
+		local s_hl = config.STATUS_COLOR[config.STATUS_SORT[p_status] or 0] or "Normal"
+		local p_badge = priority_badges[p_priority]
+		local p_hl = config.PRIORITY_HL[p_priority] or "NonText"
+
+		local parent_segs = {
 			{ UI.panel.indent },
 			{ string.format("%-" .. meta_label_width .. "s", "Parent:"), "Comment" },
-			{ parent_title, config.PARENT_HINT_HL }
-		})
+			{ s_icon .. " ", s_hl },
+			{ p_todo.title or "", "Normal" },
+		}
+		if p_badge and p_badge ~= "" and p_badge ~= " " then
+			table.insert(parent_segs, { "  " .. p_badge, p_hl })
+		end
+
+		push_segments(parent_segs)
+		parent_row_line = #lines
 	end
 
-	if #direct_subtasks > 0 then
-		local child_titles = {}
-		for _, subtask in ipairs(direct_subtasks) do
-			table.insert(child_titles, subtask.title or "")
-		end
+	-- Push Reference field (only if non-empty and not "—")
+	local reference_row_line = nil
+	if reference_value and reference_value ~= "" and reference_value ~= "—" then
 		push_segments({
 			{ UI.panel.indent },
-			{ string.format("%-" .. meta_label_width .. "s", "Children:"), "Comment" },
-			{ table.concat(child_titles, ", "), "Normal" }
+			{ string.format("%-" .. meta_label_width .. "s", "Reference:"), "Comment" },
+			{ reference_value, "Underlined" }
 		})
+		reference_row_line = #lines
 	end
-
-	push_segments({
-		{ UI.panel.indent },
-		{ string.format("%-" .. meta_label_width .. "s", "Reference:"), "Comment" },
-		{ reference_value ~= "" and reference_value or "—", reference_value ~= "" and "Underlined" or "NonText" }
-	})
-	local parent_row_line = #lines
-
-	local help_line = #lines + 1
 
 	local subtask_line_to_id = {}
 	local subtasks_first_line
 	local subtasks_last_line
 
 	if #direct_subtasks > 0 then
+		local completed_subtasks = 0
+		for _, st in ipairs(direct_subtasks) do
+			if st.status == config.STATUS_DONE then
+				completed_subtasks = completed_subtasks + 1
+			end
+		end
+
 		push("")
-		section("󰔖", "Subtasks")
-		for _, subtask in ipairs(direct_subtasks) do
+		section("󰔖", string.format("Subtasks (%d/%d)", completed_subtasks, #direct_subtasks))
+		for sub_idx, subtask in ipairs(direct_subtasks) do
+			local is_last = (sub_idx == #direct_subtasks)
+			local branch = is_last and (config.ICONS.tree_last .. " ") or (config.ICONS.tree_middle .. " ")
 			local sub_status = subtask.status or config.STATUS_TODO
 			local sub_priority = subtask.priority or config.PRIORITY_LOW
-			local status_hl = config.STATUS_COLOR[config.STATUS_SORT[sub_status] or -1] or "Normal"
-			local title_hl = utils.title_highlight_for_status(sub_status, status_hl)
-			if sub_status == config.STATUS_DONE then
-				title_hl = "Comment" -- dimmed if done!
+			local status_hl = config.STATUS_COLOR[config.STATUS_SORT[sub_status] or 0] or "Normal"
+			local title_hl = (sub_status == config.STATUS_DONE) and "Comment" or "Normal"
+
+			local s_icon = status_icons[sub_status] or ""
+			local p_badge = priority_badges[sub_priority]
+
+			local sub_segs = {
+				{ UI.panel.indent .. "  ", "Comment" },
+				{ branch, "Comment" },
+				{ s_icon .. " ", status_hl },
+				{ subtask.title or "", title_hl },
+			}
+
+			if p_badge and p_badge ~= "" and p_badge ~= " " then
+				table.insert(sub_segs, { "  " .. p_badge, config.PRIORITY_HL[sub_priority] or "NonText" })
 			end
 
-			push_segments({
-				{ UI.panel.indent .. "  ", "Comment" },
-				{ (priority_badges[sub_priority] or " ") .. " ", config.PRIORITY_HL[sub_priority] or "NonText" },
-				{ (status_icons[sub_status] or "") .. " ", status_hl },
-				{ subtask.title or "", title_hl },
-			})
+			if subtask.labels and #subtask.labels > 0 then
+				local tag_list = {}
+				for _, l in ipairs(subtask.labels) do
+					table.insert(tag_list, config.ICONS.tag .. " " .. l)
+				end
+				table.insert(sub_segs, { "  " .. table.concat(tag_list, " "), "SnacksPickerKeymapLhs" })
+			end
+
+			push_segments(sub_segs)
+
 			if not subtasks_first_line then
 				subtasks_first_line = #lines
 			end
@@ -602,7 +682,7 @@ function M.open_todo_detail(picker, item, opts)
 			zindex = 210,
 		})
 
-		vim.wo[help_win].winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs"
+		vim.wo[help_win].winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:TodoFloatTitle"
 
 		vim.keymap.set("n", "q", close_help, { buffer = hbuf, nowait = true, silent = true })
 		vim.keymap.set("n", "<Esc>", close_help, { buffer = hbuf, nowait = true, silent = true })
@@ -695,14 +775,14 @@ function M.open_todo_detail(picker, item, opts)
 		local status_hl_group = config.STATUS_COLOR[config.STATUS_SORT[current_status] or 0] or "Normal"
 		local prio_hl_group = config.PRIORITY_HL[current_priority] or "NonText"
 
-		local status_val_str = config.STATUS_LABEL[current_status] or current_status or ""
-		local priority_val_str = current_priority or ""
+		local status_val_str = status_value(current_status)
+		local priority_val_str = priority_value(current_priority)
 		local created_val_str = current_created_date or ""
 		local completed_val_str = current_completed_date ~= "" and current_completed_date or "—"
 
 		local rows = {
-			{ status_row_line, "Status:", status_hl_group, status_icons[current_status] or "", status_val_str },
-			{ priority_row_line, "Priority:", prio_hl_group, priority_badges[current_priority] or " ", priority_val_str },
+			{ status_row_line, "Status:", status_hl_group, nil, status_val_str },
+			{ priority_row_line, "Priority:", prio_hl_group, nil, priority_val_str },
 			{ created_row_line, "Created:", "Normal", nil, created_val_str },
 			{ completed_row_line, "Completed:", current_completed_date ~= "" and "Comment" or "NonText", nil, completed_val_str },
 		}
@@ -905,6 +985,9 @@ function M.open_todo_detail(picker, item, opts)
 		close_help()
 		if vim.api.nvim_win_is_valid(win) then
 			vim.api.nvim_win_close(win, true)
+		end
+		if opts and type(opts.on_close) == "function" then
+			pcall(opts.on_close)
 		end
 	end
 
@@ -1125,17 +1208,21 @@ function M.open_todo_detail(picker, item, opts)
 	end
 
 	local function open_parent_from_detail()
-		local parent_id = todo.parent_id or (draft and draft.parent_id)
-		if not parent_id or parent_id == "" then
-			utils.notify_todo("This todo has no parent", vim.log.levels.WARN)
+		local real_parent_id = todo.parent_id
+		if (not real_parent_id or real_parent_id == "" or tostring(real_parent_id):sub(1, 4) == "tag:") and draft then
+			real_parent_id = draft.parent_id
+		end
+		if (not real_parent_id or real_parent_id == "" or tostring(real_parent_id):sub(1, 4) == "tag:") and item then
+			real_parent_id = item.todo_parent_id
+		end
+
+		local parent_todo = resolve_parent_todo(real_parent_id)
+		if not parent_todo then
+			utils.notify_todo("This todo has no parent todo", vim.log.levels.WARN)
 			return
 		end
 
-		local parent_item = store.get_todo_item_by_id(parent_id)
-		if not parent_item then
-			utils.notify_todo("Parent todo not found", vim.log.levels.WARN)
-			return
-		end
+		local parent_item = store.build_item_from_todo(parent_todo)
 
 		detail_panel_stack[#detail_panel_stack + 1] = {
 			picker = picker,
@@ -1376,6 +1463,17 @@ function M.open_todo_detail(picker, item, opts)
 		vim.cmd("startinsert!")
 	end
 
+	local function focus_parent_row()
+		if not parent_row_line then
+			return false
+		end
+		if vim.fn.mode():sub(1, 1) == "i" then
+			vim.cmd.stopinsert()
+		end
+		vim.api.nvim_win_set_cursor(win, { parent_row_line, 2 })
+		return true
+	end
+
 	local function focus_subtask_line(use_last)
 		if not subtasks_first_line then
 			return
@@ -1440,6 +1538,12 @@ function M.open_todo_detail(picker, item, opts)
 			end
 		end
 
+		if parent_row_line and cursor_line == parent_row_line then
+			zone_name = "parent"
+		elseif subtasks_first_line and cursor_line >= subtasks_first_line and cursor_line <= subtasks_last_line then
+			zone_name = "subtasks"
+		end
+
 		if forward then
 			if zone_name == "title" then
 				focus_description_input_row(true)
@@ -1453,8 +1557,23 @@ function M.open_todo_detail(picker, item, opts)
 				focus_tags_input_row(true)
 				return
 			end
-			if zone_name == "tags" and subtasks_first_line then
-				focus_subtask_line(false)
+			if zone_name == "tags" then
+				if parent_row_line and focus_parent_row() then
+					return
+				end
+				if subtasks_first_line then
+					focus_subtask_line(false)
+					return
+				end
+				focus_zone(1, true)
+				return
+			end
+			if zone_name == "parent" then
+				if subtasks_first_line then
+					focus_subtask_line(false)
+					return
+				end
+				focus_zone(1, true)
 				return
 			end
 			if zone_name == "subtasks" then
@@ -1468,10 +1587,18 @@ function M.open_todo_detail(picker, item, opts)
 			return
 		end
 
+		-- Backward (<S-Tab>)
 		if zone_name == "subtasks" then
 			if step_subtask_line(false) then
 				return
 			end
+			if parent_row_line and focus_parent_row() then
+				return
+			end
+			focus_tags_input_row(false)
+			return
+		end
+		if zone_name == "parent" then
 			focus_tags_input_row(false)
 			return
 		end
@@ -1484,18 +1611,19 @@ function M.open_todo_detail(picker, item, opts)
 			return
 		end
 		if zone_name == "description" then
-			focus_zone(1, true)
+			focus_zone(1, false)
 			return
 		end
-		if zone_name == "title" then
-			if subtasks_first_line then
-				focus_subtask_line(true)
-			else
-				focus_tags_input_row(false)
-			end
+
+		-- Wrap backward from Title (zone 1)
+		if subtasks_last_line then
+			focus_subtask_line(true)
 			return
 		end
-		focus_zone(1, true)
+		if parent_row_line and focus_parent_row() then
+			return
+		end
+		focus_tags_input_row(false)
 	end
 
 	local function add_tag_row_below()
@@ -1534,10 +1662,24 @@ function M.open_todo_detail(picker, item, opts)
 		return true
 	end
 
+	local function smart_cr_or_jump()
+		local cursor_line = vim.api.nvim_win_get_cursor(win)[1]
+		if parent_row_line and cursor_line == parent_row_line then
+			open_parent_from_detail()
+			return
+		end
+		if subtask_line_to_id and subtask_line_to_id[cursor_line] then
+			open_child_from_detail()
+			return
+		end
+		save_and_close()
+	end
+
 	vim.keymap.set("n", "q", dismiss, { buffer = buf, nowait = true, silent = true })
 	vim.keymap.set("n", "?", toggle_help, { buffer = buf, nowait = true, silent = true, desc = "show detail help" })
 	vim.keymap.set("n", "<Esc>", dismiss, { buffer = buf, nowait = true, silent = true })
-	vim.keymap.set("n", "<CR>", save_and_close, { buffer = buf, nowait = true, silent = true })
+	vim.keymap.set("n", "<CR>", smart_cr_or_jump, { buffer = buf, nowait = true, silent = true, desc = "save or open selected parent/child" })
+	vim.keymap.set("n", "gd", smart_cr_or_jump, { buffer = buf, nowait = true, silent = true, desc = "open selected parent/child" })
 	vim.keymap.set("n", "e", jump, { buffer = buf, nowait = true, silent = true })
 	vim.keymap.set("n", "m", jump_reference, { buffer = buf, nowait = true, silent = true })
 	vim.keymap.set(

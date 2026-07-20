@@ -22,6 +22,36 @@ M.defaults = {
     medium = '🟡',
     high = '🔴',
   },
+  icons = {
+    parent = "󰙅",
+    tag = "",
+    tree_middle = "├─",
+    tree_last = "└─",
+    status = {
+      TODO = "",
+      DOING = "",
+      BLOCKED = "",
+      PEER_REVIEW = "",
+      DONE = "",
+    },
+    priority = {
+      HIGH = "●",
+      MEDIUM = "●",
+      LOW = " ",
+    }
+  },
+  hl_groups = {
+    parent = "TodoParentHint",
+    tag = "SnacksPickerKeymapLhs",
+    tag_header = "TodoTagHeader",
+    priority_high = "DiagnosticError",
+    priority_medium = "DiagnosticWarn",
+    priority_low = "NonText",
+    title_blocked = "TodoTitleBlocked",
+    title_peer_review = "TodoTitlePeerReview",
+    comment = "Comment",
+    normal = "Normal",
+  },
   ui = {
     picker = {
       title = 'TODOs · / search · Enter log · s status · p priority · P parent · o order · x done-cycle · f filter · t task · a subtask · e source · m reference',
@@ -131,20 +161,23 @@ function M.update_helpers()
     [M.STATUS_PEER_REVIEW] = 'Peer Review',
     [M.STATUS_DONE] = 'Done',
   }
+  M.ICONS = Config.icons
+  M.HL_GROUPS = Config.hl_groups
+
   M.PRIORITY_BADGE = {
-    [M.PRIORITY_HIGH] = Config.picker_badges.high,
-    [M.PRIORITY_MEDIUM] = Config.picker_badges.medium,
-    [M.PRIORITY_LOW] = Config.picker_badges.low,
+    [M.PRIORITY_HIGH] = Config.icons.priority.HIGH or "●",
+    [M.PRIORITY_MEDIUM] = Config.icons.priority.MEDIUM or "●",
+    [M.PRIORITY_LOW] = Config.icons.priority.LOW or " ",
   }
   M.PRIORITY_HL = {
-    [M.PRIORITY_HIGH] = 'DiagnosticError',
-    [M.PRIORITY_MEDIUM] = 'DiagnosticWarn',
-    [M.PRIORITY_LOW] = 'NonText',
+    [M.PRIORITY_HIGH] = Config.hl_groups.priority_high or 'DiagnosticError',
+    [M.PRIORITY_MEDIUM] = Config.hl_groups.priority_medium or 'DiagnosticWarn',
+    [M.PRIORITY_LOW] = Config.hl_groups.priority_low or 'NonText',
   }
-  M.PARENT_HINT_HL = 'TodoParentHint'
-  M.TAG_HEADER_HL = 'TodoTagHeader'
-  M.TITLE_HL_BLOCKED = 'TodoTitleBlocked'
-  M.TITLE_HL_PEER_REVIEW = 'TodoTitlePeerReview'
+  M.PARENT_HINT_HL = Config.hl_groups.parent or 'TodoParentHint'
+  M.TAG_HEADER_HL = Config.hl_groups.tag_header or 'TodoTagHeader'
+  M.TITLE_HL_BLOCKED = Config.hl_groups.title_blocked or 'TodoTitleBlocked'
+  M.TITLE_HL_PEER_REVIEW = Config.hl_groups.title_peer_review or 'TodoTitlePeerReview'
 
   M.STATUS_SOURCE_HL = {
     [0] = 'DiagnosticInfo',

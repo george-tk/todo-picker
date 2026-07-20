@@ -58,6 +58,11 @@ function M.apply_todo_status_highlights()
     bg = "NONE",
   })
 
+  vim.api.nvim_set_hl(0, "TodoFloatTitle", {
+    fg = M.get_highlight_hex("SnacksPickerKeymapLhs", "fg#") or M.get_highlight_hex("Title", "fg#") or "#bb9af7",
+    bold = true,
+  })
+
   vim.api.nvim_set_hl(0, "SnacksPickerBorder", { link = "TodoTransparentBorder" })
   vim.api.nvim_set_hl(0, "SnacksPicker", { link = "Normal" })
   vim.api.nvim_set_hl(0, "SnacksPickerInput", { link = "Normal" })

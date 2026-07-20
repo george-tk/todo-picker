@@ -1,14 +1,34 @@
 # todo-picker
 
-A Neovim plugin utilizing Snacks picker to bridge the gap between simple TODO lists and full-featured task details panels, similar to Jira-style tickets.
+A powerful agentic Neovim plugin built on top of `snacks.nvim` to bridge the gap between simple markdown TODOs, Kanban boards, and a full Jira/Linear-style ticket management system.
 
 ## Features
 
-- **Snacks Picker Integration**: A rich interactive picker displaying TODOs in hierarchical or flat lists.
-- **Task Details Panel**: Pressing `Enter` on any todo item opens a floating panel allowing edits to the title, description, log messages, tags/extra fields, status, and priorities.
-- **Markdown Reference Integration**: Easily sync a TODO item in a JSON file to a markdown todo item with a reference string (e.g., `TODO: task name (#id)`).
-- **Subtask Hierarchy**: Create parent-child relationships between tickets and navigate between them.
-- **Filtering and Querying**: Powerful filter syntax (`#label` or `field=value`) to segment your tasks.
+- **🎨 Dynamic Kanban Board (`:TodoBoard`)**:
+  - Interactive multi-column board with round float columns.
+  - Smart board navigation mapping (`h`, `j`, `k`, `l`) to jump between status columns.
+  - Change task status dynamically by moving cards across lanes.
+  - Press `g` to cycle grouping layout modes on the fly: Group by `Parent` (Epics) ➔ Group by `Tag` ➔ `Flat` list.
+- **📋 Work & Activity Log (`:TodoLog`)**:
+  - Open a floating Work Log dashboard segmented into Completed Tasks, Progress & Activity updates, and Active Focus items.
+  - Filter logs on the fly by tag directly from the command line: `:TodoLog week #bau` or `:TodoLog #bau`.
+  - Press `r` or `t` to cycle log ranges instantly: `Today` ➔ `Week` ➔ `Month`.
+  - Yank log summaries directly to your clipboard with `y`.
+- **🛠️ Task Details Panel**:
+  - Press `Enter` on any ticket to open a rounded, backdrop-dimmed details card.
+  - Supports inline editing of title, description, log messages, tags, status, and priorities.
+  - Section navigation: press `Tab` or `Shift-Tab` to cycle between sections—including the `Parent:` metadata row!
+  - Clean UI: empty metadata fields (such as Completed dates or Reference links) are automatically hidden instead of displaying messy `—` lines.
+- **🌿 Tree-Structure Subtask Hierarchy**:
+  - Render subtasks in the Details Panel as clean visual tree branches (`├─` and `└─`).
+  - Press `Enter` or `gd` on the parent row or any subtask row to stack details panels and jump straight to that ticket's Details Panel. Closing the child modal returns focus back to the parent ticket.
+- **🔍 Modern Search Qualifiers**:
+  - Search tags easily by typing `#tagname` in the picker search bar.
+  - Search parent subtasks using `@parentname` or `parent:parentname` directly.
+- **⚙️ Unified Design Configuration**:
+  - Set all status/priority icons, tree branches, and colorscheme highlights inside a single `icons` and `hl_groups` config schema in Neovim.
+
+---
 
 ## Installation
 
@@ -17,18 +37,67 @@ Using [lazy.nvim](https://github.com/folke/lazy.nvim):
 ```lua
 return {
   'george-tk/todo-picker',
-  -- for local testing remove gitpath
-  -- dir = '~/todo-picker/',
-  -- name = 'todo-picker'
   dependencies = {
     'folke/snacks.nvim',
   },
   opts = {}, -- This automatically configures and runs setup()
   keys = {
-    { '<leader>ft', ':Todo<CR>', desc = 'All TODOs' }
-  }
+    { '<leader>tt', ':TodoList<CR>', desc = 'ToDo List' },
+    { '<leader>tb', ':TodoBoard<CR>', desc = 'Todo Board' },
+    { '<leader>tn', ':TodoNew<CR>', desc = 'New ToDo' },
+    { '<leader>tN', ':TodoLinkNew<CR>', desc = 'New Todo + Refference' },
+    { '<leader>tr', ':TodoLink<CR>', desc = 'Refference Todo' },
+    { '<leader>tj', ':TodoJump<CR>', desc = 'Jump to Todo' },
+    { '<leader>tl', ':TodoLog<CR>', desc = 'Log' },
+  },
 }
 ```
+
+---
+
+## Configuration Defaults
+
+Custom setup options can be passed to `opts` in lazy.nvim:
+
+```lua
+require("todo-picker").setup({
+  filetypes = { "markdown", "text" },
+  date_format = "%y/%m/%d",
+  done_retention_days = 10,
+  icons = {
+    parent = "󰙅",
+    tag = "",
+    tree_middle = "├─",
+    tree_last = "└─",
+    status = {
+      TODO = "",
+      DOING = "",
+      BLOCKED = "",
+      PEER_REVIEW = "",
+      DONE = "",
+    },
+    priority = {
+      HIGH = "●",
+      MEDIUM = "●",
+      LOW = " ",
+    }
+  },
+  hl_groups = {
+    parent = "TodoParentHint",
+    tag = "SnacksPickerKeymapLhs",
+    tag_header = "TodoTagHeader",
+    priority_high = "DiagnosticError",
+    priority_medium = "DiagnosticWarn",
+    priority_low = "NonText",
+    title_blocked = "TodoTitleBlocked",
+    title_peer_review = "TodoTitlePeerReview",
+    comment = "Comment",
+    normal = "Normal",
+  }
+})
+```
+
+---
 
 ## Structure
 
@@ -44,10 +113,13 @@ todo-picker/
 │       ├── store.lua      -- store CRUD, serialization, and JSON representation
 │       ├── ui.lua         -- Floating task details card rendering & keymaps
 │       ├── picker.lua     -- Snacks.picker configuration and item collection
+│       ├── log.lua        -- Work Log generator and UI cycler
 │       └── markdown.lua   -- Markdown reference integration & cursor lookups
 └── plugin/
     └── todo-picker.lua    -- Automatic keymap and command bootstrap on startup
 ```
+
+---
 
 ## User Commands
 
@@ -57,6 +129,9 @@ todo-picker/
 - `:TodoLinkNew` - Create a new task and insert its markdown reference at the cursor line.
 - `:TodoLink` - Open picker to select a TODO and insert a reference in the current markdown buffer.
 - `:TodoJump` - Jump to details panel for the markdown reference under the cursor.
+- `:TodoLog [range] [#tag]` - Open the Work & Activity Log (e.g. `:TodoLog week #bau`).
+
+---
 
 ## Keymaps
 
@@ -83,9 +158,9 @@ todo-picker/
 
 ### Detail Window
 
-- `<CR>`: Save and close details panel
-- `w`: Save edits in-place
-- `q` / `<Esc>`: Close details panel
+- `<CR>`: Save and close details panel (if on Parent/Subtask rows, navigates to that ticket's Details Panel)
+- `gd`: Open Details Panel for Parent or Subtask task under cursor
+- `q` / `<Esc>`: Close details panel (returns to parent details if stacked)
 - `s`: Cycle status
 - `p`: Cycle priority
 - `D`: Delete todo
@@ -95,6 +170,19 @@ todo-picker/
 - `a`: Add a subtask
 - `e`: Open source JSON file
 - `m`: Open markdown reference
-- `Tab`: Jump to next details field
+- `Tab`: Jump to next details field (cycles: Title ➔ Description ➔ Log ➔ Tags ➔ Parent ➔ Subtasks)
 - `S-Tab`: Jump to previous details field
 - `?`: Toggle help menu
+
+### Kanban Board Window
+
+- `h` / `l`: Move cursor left/right between status lanes
+- `j` / `k`: Move cursor down/up within current status lane
+- `s`: Cycle task status (moves card to the next column)
+- `p`: Cycle task priority
+- `Enter` / `e`: Open task details card
+- `t`: Create new task in current status lane
+- `D`: Delete task with confirmation
+- `g`: Cycle grouping mode (Parent ➔ Tag ➔ None)
+- `?`: Toggle help menu
+- `q` / `<Esc>`: Close Kanban board

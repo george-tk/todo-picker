@@ -62,4 +62,8 @@ function M.kanban(opts)
   require('todo-picker.kanban').open_kanban(opts)
 end
 
+function M.work_log(range_arg)
+  require('todo-picker.log').open_work_log(range_arg)
+end
+
 return M

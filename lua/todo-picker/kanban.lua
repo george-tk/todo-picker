@@ -364,9 +364,9 @@ local function render_column_lane(tasks, width, lane_height)
 	local inner_w = width - 4
 
 	local priority_badges = {
-		[config.PRIORITY_HIGH] = "●",
-		[config.PRIORITY_MEDIUM] = "●",
-		[config.PRIORITY_LOW] = " ",
+		[config.PRIORITY_HIGH] = config.ICONS.priority.HIGH or "●",
+		[config.PRIORITY_MEDIUM] = config.ICONS.priority.MEDIUM or "●",
+		[config.PRIORITY_LOW] = config.ICONS.priority.LOW or " ",
 	}
 
 	for task_idx, todo in ipairs(tasks) do
@@ -435,13 +435,13 @@ local function render_column_lane(tasks, width, lane_height)
 			if todo.parent_id and todo.parent_id ~= "" then
 				local title_by_id = M.board_state.title_by_id or {}
 				local parent_title = title_by_id[todo.parent_id] or todo.parent_id
-				sub_text = "[" .. parent_title .. "]"
+				sub_text = config.ICONS.parent .. " " .. parent_title
 			end
 		elseif group_by == "parent" then
 			if todo.labels and #todo.labels > 0 then
 				local label_tokens = {}
 				for _, label in ipairs(todo.labels) do
-					table.insert(label_tokens, "#" .. tostring(label))
+					table.insert(label_tokens, config.ICONS.tag .. " " .. tostring(label))
 				end
 				sub_text = table.concat(label_tokens, " ")
 			end
@@ -1281,13 +1281,13 @@ function M.render_board()
 						if todo.parent_id and todo.parent_id ~= "" then
 							local title_by_id = M.board_state.title_by_id or {}
 							local parent_title = title_by_id[todo.parent_id] or todo.parent_id
-							sub_text = "[" .. parent_title .. "]"
+							sub_text = config.ICONS.parent .. " " .. parent_title
 						end
 					elseif group_by == "parent" then
 						if todo.labels and #todo.labels > 0 then
 							local label_tokens = {}
 							for _, label in ipairs(todo.labels) do
-								table.insert(label_tokens, "#" .. tostring(label))
+								table.insert(label_tokens, config.ICONS.tag .. " " .. tostring(label))
 							end
 							sub_text = table.concat(label_tokens, " ")
 						end
@@ -1445,11 +1445,11 @@ function M.render_board()
 
 	-- Update winbar task counts
 	local status_icons = {
-		[config.STATUS_TODO] = "",
-		[config.STATUS_BLOCKED] = "",
-		[config.STATUS_DOING] = "",
-		[config.STATUS_PEER_REVIEW] = "",
-		[config.STATUS_DONE] = "",
+		[config.STATUS_TODO] = config.ICONS.status.TODO,
+		[config.STATUS_BLOCKED] = config.ICONS.status.BLOCKED,
+		[config.STATUS_DOING] = config.ICONS.status.DOING,
+		[config.STATUS_PEER_REVIEW] = config.ICONS.status.PEER_REVIEW,
+		[config.STATUS_DONE] = config.ICONS.status.DONE,
 	}
 
 	for _, s in ipairs(sorted_statuses) do
@@ -1473,12 +1473,15 @@ function M.render_board()
 	local group_win = M.board_state.windows["GROUPING"]
 	if group_win and vim.api.nvim_win_is_valid(group_win) then
 		local group_title = "ALL"
+		local group_icon = "󰉋 "
 		if M.board_state.group_by == "parent" then
 			group_title = "PARENT"
+			group_icon = config.ICONS.parent .. " "
 		elseif M.board_state.group_by == "tag" then
 			group_title = "TAG"
+			group_icon = config.ICONS.tag .. " "
 		end
-		vim.wo[group_win].winbar = "%#SnacksPickerKeymapLhs#  󰉋 " .. group_title .. "  "
+		vim.wo[group_win].winbar = "%#SnacksPickerKeymapLhs#  " .. group_icon .. group_title .. "  "
 	end
 
 	-- Align all windows scroll positions to the active window
@@ -1834,6 +1837,7 @@ local function toggle_kanban_help()
 		"  t        Add new ticket in current lane/status",
 		"  D        Delete ticket with confirmation",
 		"  g        Cycle grouping (parent -> tag -> none)",
+		"  :TodoLog Open Work & Activity Log (today/week/month)",
 		"  ?        Toggle this help window",
 		"  q / Esc  Close Kanban board",
 	}
@@ -1865,7 +1869,7 @@ local function toggle_kanban_help()
 	})
 
 	M.board_state.help_win = help_win
-	vim.wo[help_win].winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs"
+	vim.wo[help_win].winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:TodoFloatTitle"
 
 	local function close_help_window()
 		if M.board_state.help_win and vim.api.nvim_win_is_valid(M.board_state.help_win) then
@@ -2161,7 +2165,7 @@ function M.open_kanban(opts)
 		enter = false,
 		focusable = false,
 		wo = {
-			winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs",
+			winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:TodoFloatTitle",
 		},
 		on_close = function()
 			pcall(vim.api.nvim_del_augroup_by_name, "todo_kanban_resize")

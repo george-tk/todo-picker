@@ -27,6 +27,16 @@ vim.api.nvim_create_user_command('TodoJump', function()
   require('todo-picker').goto_todo()
 end, { desc = 'Open details for the TODO under cursor' })
 
+vim.api.nvim_create_user_command('TodoLog', function(opts)
+  require('todo-picker.log').open_work_log(opts.args)
+end, {
+  nargs = '?',
+  complete = function()
+    return { 'today', 'week', 'month', '3', '7', '14', '30' }
+  end,
+  desc = 'Generate and view Work Activity Log (e.g. :TodoLog today, :TodoLog week)',
+})
+
 
 local group = vim.api.nvim_create_augroup('TodoPickerPlugin', { clear = true })
 local defaults = require('todo-picker.config').defaults

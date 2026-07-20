@@ -44,6 +44,7 @@ function M.toggle_picker_help(picker)
 
 	local help_lines = {
 		"  Todo Picker Keys",
+		"  (Search: Use '#tag' for tags, '@parent' for parent subtasks)",
 		"",
 		"  Enter  Open details",
 		"  /      Toggle list and search focus",
@@ -91,7 +92,7 @@ function M.toggle_picker_help(picker)
 		zindex = 210,
 	})
 
-	vim.wo[help_win].winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs"
+	vim.wo[help_win].winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:TodoFloatTitle"
 
 	picker_help_windows[picker] = help_win
 
@@ -461,9 +462,11 @@ function M.collect_picker_items(opts)
 				end
 			end
 			if item.todo_parent_title and item.todo_parent_title ~= "" then
+				local parent_clean = string.lower(item.todo_parent_title):gsub("%s+", "")
 				local parent_lower = string.lower(item.todo_parent_title)
-				item.text = item.text .. " [" .. parent_lower .. "] parent=" .. parent_lower
+				item.text = item.text .. " @" .. parent_clean .. " parent:" .. parent_clean .. " [" .. parent_lower .. "]"
 			end
+
 
 			-- Check if we should keep this todo
 			local is_done = status == config.STATUS_SORT[config.STATUS_DONE]
@@ -668,8 +671,9 @@ function M.collect_picker_items(opts)
 			end
 		end
 		if item.todo_parent_title and item.todo_parent_title ~= "" then
+			local parent_clean = string.lower(item.todo_parent_title):gsub("%s+", "")
 			local parent_lower = string.lower(item.todo_parent_title)
-			item.text = item.text .. " [" .. parent_lower .. "] parent=" .. parent_lower
+			item.text = item.text .. " @" .. parent_clean .. " parent:" .. parent_clean .. " [" .. parent_lower .. "]"
 		end
 
 		local is_parent_with_children = flat_order and item.todo_child_count > 0
@@ -952,17 +956,37 @@ function M.picker_open_parent_detail(picker, item)
 		return
 	end
 
-	local parent_id = target.todo_parent_id
-	if parent_id and parent_id:match("^tag:") then
-		utils.notify_todo("Tags are not parent todos", vim.log.levels.WARN)
-		return
+	local store_obj = store.load_store()
+	local parent_id = nil
+
+	if target.todo_id then
+		local bucket = store.find_todo_bucket(store_obj, target.todo_id)
+		if bucket and bucket.todo then
+			parent_id = bucket.todo.parent_id
+		end
 	end
-	if not parent_id or parent_id == "" then
-		utils.notify_todo("This todo has no parent", vim.log.levels.WARN)
+
+	if (not parent_id or parent_id == "" or parent_id:match("^tag:")) and target.todo_parent_id then
+		if not target.todo_parent_id:match("^tag:") then
+			parent_id = target.todo_parent_id
+		end
+	end
+
+	if not parent_id or parent_id == "" or parent_id == "independent" or parent_id:match("^tag:") then
+		utils.notify_todo("This todo has no parent todo", vim.log.levels.WARN)
 		return
 	end
 
 	local parent_item = store.get_todo_item_by_id(parent_id)
+	if not parent_item and store_obj and store_obj.todos then
+		for _, t in ipairs(store_obj.todos) do
+			if t.id == parent_id or t.title == parent_id then
+				parent_item = store.build_item_from_todo(t)
+				break
+			end
+		end
+	end
+
 	if not parent_item then
 		utils.notify_todo("Parent todo not found", vim.log.levels.WARN)
 		return
@@ -1361,7 +1385,7 @@ function M.get_todo_picker_opts(opts)
 	local items = M.collect_picker_items(opts)
 
 	return {
-		title = "",
+		title = " TODO Picker (Type #tag for tags, @parent for subtasks) ",
 		_todo_format_opts = opts,
 		items = items,
 		focus = "list",
@@ -1578,17 +1602,17 @@ function M.get_todo_picker_opts(opts)
 			end
 
 			local status_icons = {
-				[config.STATUS_TODO] = "",
-				[config.STATUS_BLOCKED] = "",
-				[config.STATUS_DOING] = "",
-				[config.STATUS_PEER_REVIEW] = "",
-				[config.STATUS_DONE] = "",
+				[config.STATUS_TODO] = config.ICONS.status.TODO,
+				[config.STATUS_BLOCKED] = config.ICONS.status.BLOCKED,
+				[config.STATUS_DOING] = config.ICONS.status.DOING,
+				[config.STATUS_PEER_REVIEW] = config.ICONS.status.PEER_REVIEW,
+				[config.STATUS_DONE] = config.ICONS.status.DONE,
 			}
 
 			local priority_badges = {
-				[config.PRIORITY_HIGH] = "●",
-				[config.PRIORITY_MEDIUM] = "●",
-				[config.PRIORITY_LOW] = " ",
+				[config.PRIORITY_HIGH] = config.ICONS.priority.HIGH,
+				[config.PRIORITY_MEDIUM] = config.ICONS.priority.MEDIUM,
+				[config.PRIORITY_LOW] = config.ICONS.priority.LOW,
 			}
 
 			local priority = item.todo_priority or config.PRIORITY_LOW
@@ -1629,32 +1653,29 @@ function M.get_todo_picker_opts(opts)
 
 			local parent_hint = ""
 			if show_parent_hint and item.todo_parent_title and item.todo_parent_title ~= "" then
-				parent_hint = " [" .. item.todo_parent_title .. "]"
+				parent_hint = " " .. config.ICONS.parent .. " " .. item.todo_parent_title
 			end
 
 			local tags_hint = ""
 			if show_tags_hint and item.todo_labels and #item.todo_labels > 0 then
 				local label_tokens = {}
 				for _, label in ipairs(item.todo_labels) do
-					label_tokens[#label_tokens + 1] = "#" .. tostring(label)
+					label_tokens[#label_tokens + 1] = config.ICONS.tag .. " " .. tostring(label)
 				end
 				tags_hint = " " .. table.concat(label_tokens, " ")
 			end
 
 			local display_text = item.todo_text or ""
 			if item.todo_is_tag_header then
-				if display_text ~= "Untagged" then
-					display_text = "#" .. display_text
-				end
 				return {
-					{ "󰉋 ", config.TAG_HEADER_HL },
+					{ config.ICONS.tag .. " ", config.TAG_HEADER_HL },
 					{ display_text, config.TAG_HEADER_HL },
 					{ progress_badge, "Comment" },
 				}
 			elseif item.todo_has_children and (depth == 0) then
 				return {
 					{ tree_prefix, "Comment" },
-					{ "󰉋 ", config.TAG_HEADER_HL },
+					{ config.ICONS.parent .. " ", config.TAG_HEADER_HL },
 					{ display_text, config.TAG_HEADER_HL },
 					{ progress_badge, "Comment" },
 				}
@@ -1686,7 +1707,7 @@ function M.get_todo_picker_opts(opts)
 				}
 
 				if #meta_segments > 0 then
-					table.insert(result, { "  •  ", "Comment" })
+					table.insert(result, { "   ", "Normal" })
 					for s_idx, seg in ipairs(meta_segments) do
 						table.insert(result, seg)
 						if s_idx < #meta_segments then
@@ -1711,11 +1732,11 @@ function M.get_todo_picker_opts(opts)
 		end)(),
 		win = {
 			wo = {
-				winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs",
+				winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:TodoFloatTitle",
 			},
 			input = {
 				wo = {
-					winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs",
+					winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:TodoFloatTitle",
 				},
 				keys = {
 					["<Esc>"] = {
@@ -1744,7 +1765,7 @@ function M.get_todo_picker_opts(opts)
 			},
 			list = {
 				wo = {
-					winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:SnacksPickerKeymapLhs",
+					winhighlight = "Normal:Normal,FloatBorder:TodoTransparentBorder,FloatTitle:TodoFloatTitle",
 				},
 				keys = {
 					["?"] = { "todo_toggle_help", mode = { "n" }, desc = "show picker help" },
